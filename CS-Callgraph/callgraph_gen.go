@@ -16,6 +16,28 @@ func handleInstruction(instr ssa.Instruction, callerNode *Node, g *Graph, visit 
 	switch i := instr.(type) {
 
 	// --------------------------------------------------
+	// Goroutines
+	// --------------------------------------------------
+	case *ssa.Go:
+		call := i.Common()
+		if callee := call.StaticCallee(); callee != nil {
+			calleeNode := g.GenNode(callee)
+			GenEdge(callerNode, i, calleeNode, GoEdge)
+			visit(callee)
+		}
+
+	// --------------------------------------------------
+	// Deferred calls
+	// --------------------------------------------------
+	case *ssa.Defer:
+		call := i.Common()
+		if callee := call.StaticCallee(); callee != nil {
+			calleeNode := g.GenNode(callee)
+			GenEdge(callerNode, i, calleeNode, DeferEdge)
+			visit(callee)
+		}
+
+	// --------------------------------------------------
 	// Calls
 	// --------------------------------------------------
 	case ssa.CallInstruction:
@@ -42,28 +64,6 @@ func handleInstruction(instr ssa.Instruction, callerNode *Node, g *Graph, visit 
 		if fnVal, ok := isFuncValue(i.Val); ok {
 			calleeNode := g.GenNode(fnVal)
 			GenEdge(callerNode, i, calleeNode, AssignEdge)
-		}
-
-	// --------------------------------------------------
-	// Goroutines
-	// --------------------------------------------------
-	case *ssa.Go:
-		call := i.Common()
-		if callee := call.StaticCallee(); callee != nil {
-			calleeNode := g.GenNode(callee)
-			GenEdge(callerNode, i, calleeNode, GoEdge)
-			visit(callee)
-		}
-
-	// --------------------------------------------------
-	// Deferred calls
-	// --------------------------------------------------
-	case *ssa.Defer:
-		call := i.Common()
-		if callee := call.StaticCallee(); callee != nil {
-			calleeNode := g.GenNode(callee)
-			GenEdge(callerNode, i, calleeNode, DeferEdge)
-			visit(callee)
 		}
 
 	// --------------------------------------------------
@@ -138,10 +138,19 @@ func analyseFunction(fn *ssa.Function) {
 	}
 }
 
+type edgeKey struct {
+	from *Node
+	to   *Node
+	kind EdgeKind
+}
+
+// BuildExtendedCallGraph builds the full call graph for a program.
 func BuildExtendedCallGraph(prog *ssa.Program) *Graph {
 	cg := InitGraph(nil)
 	seen := map[*ssa.Function]bool{}
+	seenEdges := map[edgeKey]bool{}
 
+	// Recursive visit
 	var visit func(fn *ssa.Function)
 	visit = func(fn *ssa.Function) {
 		if fn == nil || seen[fn] {
@@ -151,14 +160,29 @@ func BuildExtendedCallGraph(prog *ssa.Program) *Graph {
 
 		callerNode := cg.GenNode(fn)
 
+		// Iterate instructions
 		for _, block := range fn.Blocks {
 			for _, instr := range block.Instrs {
-				handleInstruction(instr, callerNode, cg, visit)
+				calleeNode, kind := extractCalleeAndKind(cg, instr)
+				if calleeNode == nil {
+					continue
+				}
+
+				key := edgeKey{from: callerNode, to: calleeNode, kind: kind}
+				if !seenEdges[key] {
+					GenEdge(callerNode, instr, calleeNode, kind)
+					seenEdges[key] = true
+				}
+
+				// Recursively visit callee functions (including closures)
+				if calleeNode.Func != nil && calleeNode.Func != fn {
+					visit(calleeNode.Func)
+				}
 			}
 		}
 	}
 
-	// Roots (same logic as static builder)
+	// Start from all package-level functions
 	for _, pkg := range prog.AllPackages() {
 		for _, mem := range pkg.Members {
 			if fn, ok := mem.(*ssa.Function); ok {
@@ -168,4 +192,43 @@ func BuildExtendedCallGraph(prog *ssa.Program) *Graph {
 	}
 
 	return cg
+}
+
+// extractCalleeAndKind returns the callee Node and edge kind for an instruction
+func extractCalleeAndKind(cg *Graph, instr ssa.Instruction) (*Node, EdgeKind) {
+	switch i := instr.(type) {
+
+	case *ssa.Go:
+		call := i.Common()
+		if callee := call.StaticCallee(); callee != nil {
+			return cg.GenNode(callee), GoEdge
+		}
+
+	case *ssa.Defer:
+		call := i.Common()
+		if callee := call.StaticCallee(); callee != nil {
+			return cg.GenNode(callee), DeferEdge
+		}
+
+	case ssa.CallInstruction:
+		call := i.Common()
+
+		// Static call
+		if callee := call.StaticCallee(); callee != nil {
+			return cg.GenNode(callee), CallEdge
+		}
+
+		// Dynamic call via function value (closure)
+		if fnVal, ok := isFuncValue(call.Value); ok {
+			return cg.GenNode(fnVal), CallEdge
+		}
+
+	case *ssa.Panic:
+		return cg.Root, PanicEdge
+
+	case *ssa.Send:
+		return cg.Root, SendEdge
+	}
+
+	return nil, 0
 }
