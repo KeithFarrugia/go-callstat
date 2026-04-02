@@ -12,7 +12,7 @@
         },
         "external": {
             "shape"     : "box",
-            "style"     : "solid",
+            "style"     : "filled",
             "color"     : "#444444",
             "fillcolor" : "#f5e6c8"
         }
@@ -52,6 +52,6 @@
         "fillcolor"     : "#ebc38b",
         "color"         : "#af7a2e",
         "style"         : "filled",
-        "labelfontname" : "Helvetica-Bold"
+        "labelfontname" : "Cascadia-Mono"
     }
 }
