@@ -1,0 +1,57 @@
+{
+    "nodeStyles": {
+        "normal": {
+            "shape"     : "box",
+            "style"     : "solid",
+            "color"     : "#484061"
+        },
+        "anonymous": {
+            "shape"     : "box",
+            "style"     : "dashed",
+            "color"     : "#6c3636"
+        },
+        "external": {
+            "shape"     : "box",
+            "style"     : "solid",
+            "color"     : "#444444",
+            "fillcolor" : "#f5e6c8"
+        }
+    },
+    "edgeStyles": {
+        "call": {
+            "color"     : "#2b2b2b",
+            "style"     : "solid",
+            "arrowhead" : "normal",
+            "label"     : "call"
+        },
+        "go": {
+            "color"     : "#1f77b4",
+            "style"     : "dashed",
+            "arrowhead" : "dot",
+            "label"     : "go"
+        },
+        "defer": {
+            "color"     : "#9467bd",
+            "style"     : "dotted",
+            "arrowhead" : "diamond",
+            "label"     : "defer"
+        },
+        "panic": {
+            "color"     : "#d62728",
+            "style"     : "bold",
+            "arrowhead" : "tee",
+            "label"     : "panic"
+        },
+        "default": {
+            "color"     : "#000000",
+            "style"     : "solid",
+            "arrowhead" : "normal"
+        }
+    },
+    "cluster": {
+        "fillcolor"     : "#ebc38b",
+        "color"         : "#af7a2e",
+        "style"         : "filled",
+        "labelfontname" : "Helvetica-Bold"
+    }
+}

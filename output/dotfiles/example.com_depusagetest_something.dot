@@ -1,0 +1,7 @@
+digraph "" {
+  rankdir=LR;
+  "n1" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest/something.init"];
+  "n12" [color="#484061", label="Ping", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).Ping"];
+  "n13" [color="#484061", label="DoingAThing", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).DoingAThing"];
+  "n12" -> "n13" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="(*Bob).DoingAThing(b)"];
+}

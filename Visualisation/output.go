@@ -1,4 +1,4 @@
-package main
+package visualisation
 
 import (
 	cs_callgraph "callstat/CS-Callgraph"
@@ -6,60 +6,26 @@ import (
 	"strings"
 )
 
-type EdgeStyle struct {
-	Color     string
-	Style     string
-	ArrowHead string
-	Label     string
+type PackageGraph struct {
+	Name          string
+	Nodes         map[int]*DotNode
+	Edges         []*DotEdge
+	ExternalFuncs map[string]*cs_callgraph.Node // key = full func name
 }
 
-var EdgeStyles = map[cs_callgraph.EdgeKind]EdgeStyle{
-	cs_callgraph.CallEdge: {
-		Color:     "#2b2b2b",
-		Style:     "solid",
-		ArrowHead: "normal",
-		Label:     "call",
-	},
-	cs_callgraph.GoEdge: {
-		Color:     "#1f77b4",
-		Style:     "dashed",
-		ArrowHead: "dot",
-		Label:     "go",
-	},
-	cs_callgraph.DeferEdge: {
-		Color:     "#9467bd",
-		Style:     "dotted",
-		ArrowHead: "diamond",
-		Label:     "defer",
-	},
-	cs_callgraph.PanicEdge: {
-		Color:     "#d62728",
-		Style:     "bold",
-		ArrowHead: "tee",
-		Label:     "panic",
-	},
+
+func shortPkgName(pkgPath string) string {
+	parts := strings.Split(pkgPath, "/")
+	return parts[len(parts)-1]
 }
 
-type NodeStyle struct {
-	Shape string
-	Style string
-	Color string
-}
-
-var (
-	NormalFuncNode = NodeStyle{
-		Shape: "box",
-		Style: "solid",
-		Color: "#484061",
-	}
-
-	AnonFuncNode = NodeStyle{
-		Shape: "box",
-		Style: "dashed",
-		Color: "#6c3636",
-	}
-)
-
+/* ============================================================================
+ * isAnonFunc
+ * ----------------------------------------------------------------------------
+ * Checks whether a function is anonymous by looking for compiler-generated
+ * naming patterns (e.g. containing '$'). Returns false if function is nil.
+ * ============================================================================
+ */
 func isAnonFunc(fn *cs_callgraph.Node) bool {
 	if fn.Func == nil {
 		return false
@@ -67,84 +33,72 @@ func isAnonFunc(fn *cs_callgraph.Node) bool {
 	return strings.Contains(fn.Func.Name(), "$")
 }
 
-func shortFuncName(fn *cs_callgraph.Node) string {
-	if fn.Func == nil {
-		return "<root>"
-	}
-	return fn.Func.Name()
-}
 
-func fullFuncName(fn *cs_callgraph.Node) string {
-	if fn.Func == nil {
-		return "<root>"
-	}
-	return fn.Func.String()
-}
 
-func dotNodeFromCS(n *cs_callgraph.Node) *DotNode {
-	style := NormalFuncNode
-	if isAnonFunc(n) {
-		style = AnonFuncNode
-	}
+/* ============================================================================
+ * BuildDotGraphFromCS
+ * ----------------------------------------------------------------------------
+ * Builds a complete DOT graph from the custom call graph structure by
+ * converting all nodes and edges into their DOT representations.
+ * ============================================================================
+ */
+func BuildDotGraphPerPackage(g *cs_callgraph.Graph) map[string]*DotGraph {
+	// packageGraphs maps a Go package path to its specific visual representation
+	packageGraphs := map[string]*DotGraph{}
 
-	attrs := map[string]string{
-		"shape": style.Shape,
-		"style": style.Style,
-		"color": style.Color,
-		"label": shortFuncName(n),
-	}
-
-	// Tooltip shows full path + signature
-	if n.Func != nil {
-		attrs["tooltip"] = fullFuncName(n)
-	}
-
-	return &DotNode{
-		ID:    fmt.Sprintf("n%d", n.ID),
-		Attrs: attrs,
-	}
-}
-
-func dotEdgeFromCS(e *cs_callgraph.Edge) *DotEdge {
-	style, ok := EdgeStyles[e.Kind]
-	if !ok {
-		style = EdgeStyle{Color: "black", Style: "solid", ArrowHead: "normal"}
-	}
-
-	attrs := map[string]string{
-		"color":     style.Color,
-		"style":     style.Style,
-		"arrowhead": style.ArrowHead,
-		"label":     style.Label,
-	}
-
-	if e.Site != nil {
-		attrs["tooltip"] = e.Description()
-	}
-
-	return &DotEdge{
-		From:  fmt.Sprintf("n%d", e.Caller.ID),
-		To:    fmt.Sprintf("n%d", e.Callee.ID),
-		Attrs: attrs,
-	}
-}
-
-func BuildDotGraphFromCS(g *cs_callgraph.Graph) *DotGraph {
-	dg := newDotGraph()
-
-	// Nodes
+	// FOR ALL the nodes in the generated call graph traverse and create a dot format
 	for _, n := range g.Nodes {
-		dg.Nodes[fmt.Sprintf("n%d", n.ID)] = dotNodeFromCS(n)
-	}
+		// --- 1. VALIDATION & GRAPH INITIALIZATION ---
+		// Skip nodes that don't belong to a valid package (e.g., synthetic or incomplete nodes)
+		if n.Func == nil || n.Func.Pkg == nil || n.Func.Pkg.Pkg == nil {
+			continue
+		}
 
-	// Edges
-	for _, n := range g.Nodes {
+		// Identify the package for this node and ensure a DotGraph exists for it
+		pkgPath := n.Func.Pkg.Pkg.Path()
+		if _, ok := packageGraphs[pkgPath]; !ok {
+			packageGraphs[pkgPath] = newDotGraph()
+		}
+		pkgGraph := packageGraphs[pkgPath]
+
+		// --- 2. LOCAL NODE REGISTRATION ---
+		// Convert the internal callgraph node into a DOT node and store it in the current package graph
+		nodeID := fmt.Sprintf("n%d", n.ID)
+		pkgGraph.Nodes[nodeID] = buildNodeFromCS(n)
+
+		// Iterate through all outgoing edges (function calls) from this node
 		for _, e := range n.Out {
-			dg.Edges = append(dg.Edges, dotEdgeFromCS(e))
+
+			// --- 3. ROOT / SPECIAL EDGE HANDLING ---
+			// Handle edges where the target (Callee) is nil or has no function metadata.
+			// This typically represents entry points or low-level runtime calls.
+			if e.Callee == nil || e.Callee.Func == nil {
+				rootID := fmt.Sprintf("n%d", e.Callee.ID)
+
+				// Ensure the root/special node exists in the current package's graph
+				if _, exists := pkgGraph.Nodes[rootID]; !exists {
+					pkgGraph.Nodes[rootID] = buildNodeFromCS(e.Callee)
+				}
+
+				pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
+				continue
+			}
+
+			calleePkg := e.Callee.Func.Pkg.Pkg.Path()
+
+			// --- 4. INTRA-PACKAGE EDGE HANDLING ---
+			// If the caller and callee are in the same package, simply draw a direct edge.
+			if calleePkg == pkgPath {
+				pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
+				continue
+			}else{
+				buildLinkClusterNode(pkgGraph, &calleePkg, e, n)
+			}
+			
 		}
 	}
 
-	return dg
+	return packageGraphs
 }
 
 // // --- Filtering --------------------------------------------------------------

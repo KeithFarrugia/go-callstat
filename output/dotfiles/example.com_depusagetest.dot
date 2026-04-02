@@ -1,0 +1,39 @@
+digraph "" {
+  rankdir=LR;
+  subgraph "cluster_example.com/depusagetest/something" {
+    style=rounded;
+    labelfontname="Helvetica-Bold";
+    label="something";
+    tooltip="example.com/depusagetest/something";
+    fillcolor="#ebc38b";
+    color="#af7a2e";
+    style="filled";
+    labelfontname="Helvetica-Bold";
+    "ext_1" [color="#444444", fillcolor="#f5e6c8", label="init", shape="box", style="solid", tooltip="example.com/depusagetest/something.init"];
+    "ext_12" [color="#444444", fillcolor="#f5e6c8", label="Ping", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).Ping"];
+  }
+  "n0" [color="#484061", label="<root>", shape="box", style="solid", tooltip="<root>"];
+  "n10" [color="#6c3636", label="main$1", shape="box", style="dashed", tooltip="example.com/depusagetest.main$1"];
+  "n11" [color="#6c3636", label="main$2", shape="box", style="dashed", tooltip="example.com/depusagetest.main$2"];
+  "n2" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest.init"];
+  "n3" [color="#484061", label="add", shape="box", style="solid", tooltip="example.com/depusagetest.add"];
+  "n4" [color="#484061", label="mul", shape="box", style="solid", tooltip="example.com/depusagetest.mul"];
+  "n5" [color="#484061", label="square", shape="box", style="solid", tooltip="example.com/depusagetest.square"];
+  "n6" [color="#484061", label="worker", shape="box", style="solid", tooltip="example.com/depusagetest.worker"];
+  "n7" [color="#6c3636", label="worker$1", shape="box", style="dashed", tooltip="example.com/depusagetest.worker$1"];
+  "n8" [color="#484061", label="maybePanic", shape="box", style="solid", tooltip="example.com/depusagetest.maybePanic"];
+  "n9" [color="#484061", label="main", shape="box", style="solid", tooltip="example.com/depusagetest.main"];
+  "n10" -> "n3" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="add(2:int, 3:int)"];
+  "n10" -> "n0" [arrowhead="normal", color="#000000", style="solid", tooltip="send t1 <- t2"];
+  "n11" -> "n8" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="maybePanic(v)"];
+  "n2" -> "ext_1" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="example.com/depusagetest/something.init()"];
+  "n5" -> "n4" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="mul(x, x)"];
+  "n6" -> "n7" [arrowhead="diamond", color="#9467bd", label="defer", style="dotted", tooltip="deferred defer t1()"];
+  "n6" -> "n5" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="square(t4)"];
+  "n6" -> "n0" [arrowhead="normal", color="#000000", style="solid", tooltip="send results <- t5"];
+  "n8" -> "n0" [arrowhead="tee", color="#d62728", label="panic", style="bold", tooltip="panic t1"];
+  "n9" -> "n6" [arrowhead="dot", color="#1f77b4", label="go", style="dashed", tooltip="concurrent go worker(1:int, t4, t5)"];
+  "n9" -> "n10" [arrowhead="dot", color="#1f77b4", label="go", style="dashed", tooltip="concurrent go t9()"];
+  "n9" -> "n11" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="main$2(t12)"];
+  "n9" -> "ext_12" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="(*example.com/depusagetest/something.Bob).Ping(t14)"];
+}
