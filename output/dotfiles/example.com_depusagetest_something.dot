@@ -7,13 +7,13 @@ digraph "" {
     labelfontname="Cascadia-Mono";
     style="filled";
     tooltip="fmt";
-    "ext_4928" [color="#444444", fillcolor="#f5e6c8", label="Printf", shape="box", style="filled", tooltip="fmt.Printf"];
-    "ext_903" [color="#444444", fillcolor="#f5e6c8", label="init", shape="box", style="filled", tooltip="fmt.init"];
+    "ext_5128" [color="#444444", fillcolor="#f5e6c8", label="Printf", shape="box", style="filled", tooltip="fmt.Printf"];
+    "ext_4219" [color="#444444", fillcolor="#f5e6c8", label="init", shape="box", style="filled", tooltip="fmt.init"];
   }
-  "n4926" [color="#484061", label="Ping", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).Ping"];
-  "n4927" [color="#484061", label="DoingAThing", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).DoingAThing"];
-  "n902" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest/something.init"];
-  "n4926" -> "n4927" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="(*Bob).DoingAThing(b)"];
-  "n4926" -> "ext_4928" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.Printf(\"Hello\":string, nil:[]any...)"];
-  "n902" -> "ext_903" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.init()"];
+  "n4218" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest/something.init"];
+  "n5126" [color="#484061", label="Ping", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).Ping"];
+  "n5127" [color="#484061", label="DoingAThing", shape="box", style="solid", tooltip="(*example.com/depusagetest/something.Bob).DoingAThing"];
+  "n5126" -> "n5127" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="(*Bob).DoingAThing(b)"];
+  "n5126" -> "ext_5128" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.Printf(\"Hello\":string, nil:[]any...)"];
+  "n4218" -> "ext_4219" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.init()"];
 }

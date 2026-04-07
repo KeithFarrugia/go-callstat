@@ -29,7 +29,7 @@ func main() {
 	prog.Build()
 
 	// --- Build call graph ---
-	cg := cs_callgraph.BuildExtendedCallGraph(prog)
+	cg := cs_callgraph.BuildExtendedCallGraph2(prog)
 
 	// --- Generate DOT + SVG for each package concurrently (max 4 goroutines) ---
 	visualisation.GenerateDOTAndSVG(cg, "./output/dotfiles", "./output/svgs", 4)

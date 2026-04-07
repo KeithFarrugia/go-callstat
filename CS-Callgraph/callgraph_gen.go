@@ -12,80 +12,6 @@ type AnalysisCtx struct {
 	Visit  func(*ssa.Function)
 }
 
-func handleInstruction(instr ssa.Instruction, callerNode *Node, g *Graph, visit func(*ssa.Function)) {
-	switch i := instr.(type) {
-
-	// --------------------------------------------------
-	// Goroutines
-	// --------------------------------------------------
-	case *ssa.Go:
-		call := i.Common()
-		if callee := call.StaticCallee(); callee != nil {
-			calleeNode := g.GenNode(callee)
-			GenEdge(callerNode, i, calleeNode, GoEdge)
-			visit(callee)
-		}
-
-	// --------------------------------------------------
-	// Deferred calls
-	// --------------------------------------------------
-	case *ssa.Defer:
-		call := i.Common()
-		if callee := call.StaticCallee(); callee != nil {
-			calleeNode := g.GenNode(callee)
-			GenEdge(callerNode, i, calleeNode, DeferEdge)
-			visit(callee)
-		}
-
-	// --------------------------------------------------
-	// Calls
-	// --------------------------------------------------
-	case ssa.CallInstruction:
-		call := i.Common()
-
-		// Static call
-		if callee := call.StaticCallee(); callee != nil {
-			calleeNode := g.GenNode(callee)
-			GenEdge(callerNode, i, calleeNode, CallEdge)
-			visit(callee)
-			return
-		}
-
-		// Dynamic call via function value
-		if fnVal, ok := isFuncValue(call.Value); ok {
-			calleeNode := g.GenNode(fnVal)
-			GenEdge(callerNode, i, calleeNode, CallEdge)
-		}
-
-	// --------------------------------------------------
-	// Function assignment (escaping function value)
-	// --------------------------------------------------
-	case *ssa.Store:
-		if fnVal, ok := isFuncValue(i.Val); ok {
-			calleeNode := g.GenNode(fnVal)
-			GenEdge(callerNode, i, calleeNode, AssignEdge)
-		}
-
-	// --------------------------------------------------
-	// Panic
-	// --------------------------------------------------
-	case *ssa.Panic:
-		GenEdge(callerNode, i, g.Root, PanicEdge)
-
-	// --------------------------------------------------
-	// Channel send (optional modeling)
-	// --------------------------------------------------
-	case *ssa.Send:
-		GenEdge(callerNode, i, g.Root, SendEdge)
-
-	// --------------------------------------------------
-	// Other instructions can be ignored or handled later
-	// --------------------------------------------------
-	default:
-		// no-op
-	}
-}
-
 func isFuncValue(v ssa.Value) (*ssa.Function, bool) {
 	switch v := v.(type) {
 	case *ssa.Function:
@@ -97,45 +23,6 @@ func isFuncValue(v ssa.Value) (*ssa.Function, bool) {
 		}
 	}
 	return nil, false
-}
-
-func analyseFunction(fn *ssa.Function) {
-	for _, block := range fn.Blocks {
-		for _, instr := range block.Instrs {
-
-			switch i := instr.(type) {
-
-			// Anything that can invoke code
-			case ssa.CallInstruction:
-				call := i.Common()
-				if callee := call.StaticCallee(); callee != nil {
-					fmt.Printf("    invoke -> %s\n", callee.String())
-				} else {
-					fmt.Printf("    invoke -> dynamic: %s\n", call.Value)
-				}
-
-			// Abnormal control flow
-			case *ssa.Panic:
-				fmt.Printf("    panic  -> %s\n", i.X)
-
-			// (Optional) channel, goroutine, or other effects
-			case *ssa.Send:
-				fmt.Printf("    send   -> %s\n", i.Chan)
-
-			case *ssa.Select:
-				fmt.Printf("    select\n")
-
-			case *ssa.Store:
-				if fnVal, ok := isFuncValue(i.Val); ok {
-					fmt.Printf(
-						"    assign -> %s assigns function %s\n",
-						fn.String(),
-						fnVal.String(),
-					)
-				}
-			}
-		}
-	}
 }
 
 type edgeKey struct {
@@ -198,37 +85,151 @@ func BuildExtendedCallGraph(prog *ssa.Program) *Graph {
 func extractCalleeAndKind(cg *Graph, instr ssa.Instruction) (*Node, EdgeKind) {
 	switch i := instr.(type) {
 
+	// case *ssa.Go:
+	// 	call := i.Common()
+	// 	if callee := call.StaticCallee(); callee != nil {
+	// 		return cg.GenNode(callee), GoEdge
+	// 	}
+
+	// case *ssa.Defer:
+	// 	call := i.Common()
+	// 	if callee := call.StaticCallee(); callee != nil {
+	// 		return cg.GenNode(callee), DeferEdge
+	// 	}
+
+	// case ssa.CallInstruction:
+	// 	call := i.Common()
+
+	// 	// Static call
+	// 	if callee := call.StaticCallee(); callee != nil {
+	// 		return cg.GenNode(callee), CallEdge
+	// 	}
+
+	// 	// Dynamic call via function value (closure)
+	// 	if fnVal, ok := isFuncValue(call.Value); ok {
+	// 		return cg.GenNode(fnVal), CallEdge
+	// 	}
+
+	// case *ssa.Panic:
+	// 	return cg.Root, PanicEdge
+
+	// case *ssa.Send:
+	// 	return cg.Root, SendEdge
+
+	case *ssa.Store:
+		fmt.Printf("Store Instruction \n\t %s\n", i.String())
+        if fnVal, ok := isFuncValue(i.Val); ok {
+            return cg.GenNode(fnVal), AssignEdge
+        }
+    default :
+		fmt.Printf("Instruction \n\t %s\n \t Type: %s \n", instr.String(), instr.Parent().Type())
+	}
+	return nil, 0
+}
+
+
+type nodeKind struct {
+	node *Node
+	kind EdgeKind
+}
+func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
+	fmt.Printf("Instruction\n \t%s\n", instr.String())
+	switch i := instr.(type) {
+
 	case *ssa.Go:
 		call := i.Common()
 		if callee := call.StaticCallee(); callee != nil {
-			return cg.GenNode(callee), GoEdge
+			return []nodeKind{{cg.GenNode(callee), GoEdge}}
 		}
 
 	case *ssa.Defer:
 		call := i.Common()
 		if callee := call.StaticCallee(); callee != nil {
-			return cg.GenNode(callee), DeferEdge
+			return []nodeKind{{cg.GenNode(callee), DeferEdge}}
 		}
 
 	case ssa.CallInstruction:
 		call := i.Common()
+		var results []nodeKind
 
-		// Static call
+		// The callee itself
 		if callee := call.StaticCallee(); callee != nil {
-			return cg.GenNode(callee), CallEdge
+			results = append(results, nodeKind{cg.GenNode(callee), CallEdge})
+		} else if fnVal, ok := isFuncValue(call.Value); ok {
+			results = append(results, nodeKind{cg.GenNode(fnVal), CallEdge})
 		}
 
-		// Dynamic call via function value (closure)
-		if fnVal, ok := isFuncValue(call.Value); ok {
-			return cg.GenNode(fnVal), CallEdge
+		// Arguments — catches callOthers(triangle) / callOthers(area)
+		for _, arg := range call.Args {
+			if fnVal, ok := isFuncValue(arg); ok {
+				results = append(results, nodeKind{cg.GenNode(fnVal), AssignEdge})
+			}
+		}
+
+		return results
+	case *ssa.Return:
+		var results []nodeKind
+		for _, val := range i.Results {
+			if fnVal, ok := isFuncValue(val); ok {
+				results = append(results, nodeKind{cg.GenNode(fnVal), AssignEdge})
+			}
+		}
+		return results
+	case *ssa.Store:
+		if fnVal, ok := isFuncValue(i.Val); ok {
+			return []nodeKind{{cg.GenNode(fnVal), AssignEdge}}
 		}
 
 	case *ssa.Panic:
-		return cg.Root, PanicEdge
+		return []nodeKind{{cg.Root, PanicEdge}}
 
 	case *ssa.Send:
-		return cg.Root, SendEdge
+		return []nodeKind{{cg.Root, SendEdge}}
 	}
 
-	return nil, 0
+	return nil
+}
+
+
+func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
+	cg := InitGraph(nil)
+	seen := map[*ssa.Function]bool{}
+	seenEdges := map[edgeKey]bool{}
+	
+	var visit func(fn *ssa.Function)
+	visit = func(fn *ssa.Function) {
+		if fn == nil || seen[fn] {
+			return
+		}
+		seen[fn] = true
+
+		callerNode := cg.GenNode(fn)
+
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				for _, e := range extractEdges(cg, instr) {
+					key := edgeKey{from: callerNode, to: e.node, kind: e.kind}
+					if !seenEdges[key] {
+						GenEdge(callerNode, instr, e.node, e.kind)
+						seenEdges[key] = true
+					}
+
+					if e.node.Func != nil && e.node.Func != fn {
+						visit(e.node.Func)
+					}
+				}
+			}
+		}
+	}
+
+	// Start from all package-level functions
+	for _, pkg := range prog.AllPackages() {
+		for _, mem := range pkg.Members {
+			if fn, ok := mem.(*ssa.Function); ok {
+				visit(fn)
+			}
+		}
+	}
+
+	return cg
 }
