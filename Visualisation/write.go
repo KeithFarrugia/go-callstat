@@ -161,7 +161,10 @@ func writeEdge(e *DotEdge, f *os.File) {
  * Safe to sort keys as attribute maps are small.
  * ============================================================================
  */
-func writeAttrsGeneric(f *os.File, attrs map[string]string, inline bool, indent int) {
+func writeAttrsGeneric(
+	f 			*os.File, attrs map[string]string, 
+	inline 		bool	, indent int,
+) {
 	if len(attrs) == 0 {
 		return
 	}

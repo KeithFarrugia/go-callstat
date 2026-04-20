@@ -16,15 +16,16 @@ type NodeStyle string
 type EdgeStyle string
 
 const (
-	ns_normal   NodeStyle = "normal"
-	ns_anon     NodeStyle = "anonymous"
-	ns_external NodeStyle = "external"
+	ns_normal   NodeStyle 	= "normal"
+	ns_anon     NodeStyle 	= "anonymous"
+	ns_external NodeStyle 	= "external"
+	ns_panic 	NodeStyle 	= "panic"
 
-	es_call    EdgeStyle = "call"
-	es_go      EdgeStyle = "go"
-	es_defer   EdgeStyle = "defer"
-	es_panic   EdgeStyle = "panic"
-	es_default EdgeStyle = "default"
+	es_call    EdgeStyle 	= "call"
+	es_go      EdgeStyle 	= "go"
+	es_defer   EdgeStyle 	= "defer"
+	es_panic   EdgeStyle 	= "panic"
+	es_default EdgeStyle 	= "default"
 )
 
 /* ============================================================================

@@ -1,9 +1,56 @@
 digraph "" {
   rankdir=LR;
-  "n1" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest.init"];
-  "n2" [color="#484061", label="triangle", shape="box", style="solid", tooltip="example.com/depusagetest.triangle"];
-  "n3" [color="#484061", label="callOthers", shape="box", style="solid", tooltip="example.com/depusagetest.callOthers"];
-  "n4" [color="#484061", label="main", shape="box", style="solid", tooltip="example.com/depusagetest.main"];
-  "n3" -> "n2" [arrowhead="normal", color="#000000", style="solid", tooltip="return triangle"];
-  "n4" -> "n2" [arrowhead="normal", color="#000000", style="solid", tooltip="*storedFn = triangle"];
+  subgraph "cluster_example.com/depusagetest/something" {
+    label="something";
+    color="#af7a2e";
+    fillcolor="#ebc38b";
+    labelfontname="Cascadia-Mono";
+    style="filled";
+    tooltip="example.com/depusagetest/something";
+    "ext_4577" [color="#444444", fillcolor="#f5e6c8", label="init", shape="box", style="filled", tooltip="example.com/depusagetest/something.init"];
+    "ext_4570" [color="#444444", fillcolor="#f5e6c8", label="Map", shape="box", style="filled", tooltip="example.com/depusagetest/something.Map"];
+  }
+  subgraph "cluster_fmt" {
+    label="fmt";
+    color="#af7a2e";
+    fillcolor="#ebc38b";
+    labelfontname="Cascadia-Mono";
+    style="filled";
+    tooltip="fmt";
+    "ext_4560" [color="#444444", fillcolor="#f5e6c8", label="Printf", shape="box", style="filled", tooltip="fmt.Printf"];
+    "ext_4573" [color="#444444", fillcolor="#f5e6c8", label="init", shape="box", style="filled", tooltip="fmt.init"];
+    "ext_4470" [color="#444444", fillcolor="#f5e6c8", label="Println", shape="box", style="filled", tooltip="fmt.Println"];
+  }
+  "n4459" [color="#484061", label="Map", shape="box", style="solid", tooltip="example.com/depusagetest.Map"];
+  "n4460" [color="#484061", label="main", shape="box", style="solid", tooltip="example.com/depusagetest.main"];
+  "n4461" [color="#484061", label="worker", shape="box", style="solid", tooltip="example.com/depusagetest.worker"];
+  "n4462" [color="#6c3636", label="worker$1", shape="box", style="dashed", tooltip="example.com/depusagetest.worker$1"];
+  "n4463" [color="#484061", label="square", shape="box", style="solid", tooltip="example.com/depusagetest.square"];
+  "n4464" [color="#484061", label="mul", shape="box", style="solid", tooltip="example.com/depusagetest.mul"];
+  "n4465" [color="#6c3636", label="main$1", shape="box", style="dashed", tooltip="example.com/depusagetest.main$1"];
+  "n4466" [color="#484061", label="add", shape="box", style="solid", tooltip="example.com/depusagetest.add"];
+  "n4467" [color="#6c3636", label="main$2", shape="box", style="dashed", tooltip="example.com/depusagetest.main$2"];
+  "n4468" [color="#484061", label="maybePanic", shape="box", style="solid", tooltip="example.com/depusagetest.maybePanic"];
+  "n4469" [color="#484061", label="triangle", shape="box", style="solid", tooltip="example.com/depusagetest.triangle"];
+  "n4571" [color="#6c3636", label="main$3", shape="box", style="dashed", tooltip="example.com/depusagetest.main$3"];
+  "n4572" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest.init"];
+  "panic_sink" [color="#722f37", fontcolor="white", label="PANIC", shape="box", style="filled", tooltip="panic_sink"];
+  "n4468" -> "panic_sink" [arrowhead="tee", color="#722f37", label="panic", style="bold", tooltip="panic t1"];
+  "n4467" -> "n4468" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="maybePanic(v)"];
+  "n4463" -> "n4464" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="mul(x, x)"];
+  "n4572" -> "ext_4573" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.init()"];
+  "n4572" -> "ext_4577" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="example.com/depusagetest/something.init()"];
+  "n4571" -> "n4469" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="triangle(h, 3:float32)"];
+  "n4461" -> "n4462" [arrowhead="diamond", color="#9467bd", label="defer", style="dotted", tooltip="deferred defer t1()"];
+  "n4461" -> "n4463" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="square(t4)"];
+  "n4465" -> "n4466" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="add(2:int, 3:int)"];
+  "n4460" -> "n4461" [arrowhead="dot", color="#1f77b4", label="go", style="dashed", tooltip="concurrent go worker(1:int, t4, t5)"];
+  "n4460" -> "n4465" [arrowhead="dot", color="#1f77b4", label="go", style="dashed", tooltip="concurrent go t9()"];
+  "n4460" -> "n4467" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="main$2(t12)"];
+  "n4460" -> "n4469" [arrowhead="normal", color="#000000", style="solid", tooltip="*t15 = triangle"];
+  "n4460" -> "ext_4470" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.Println(t19...)"];
+  "n4460" -> "ext_4560" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="fmt.Printf(\"Somthing %s\":string, t24...)"];
+  "n4460" -> "ext_4570" [arrowhead="normal", color="#2b2b2b", label="call", style="solid", tooltip="example.com/depusagetest/something.Map[int int](t32, square)"];
+  "n4460" -> "n4463" [arrowhead="normal", color="#000000", style="solid", tooltip="example.com/depusagetest/something.Map[int int](t32, square)"];
+  "n4460" -> "n4571" [arrowhead="normal", color="#000000", style="solid", tooltip="example.com/depusagetest/something.Map[float32 float32](t46, main$3)"];
 }

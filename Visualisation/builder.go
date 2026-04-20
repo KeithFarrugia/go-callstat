@@ -18,13 +18,11 @@ import (
  * ============================================================================
  */
 type PackageGraph struct {
-    Name          string
-    Nodes         map[int]*DotNode
-    Edges         []*DotEdge
-    ExternalFuncs map[string]*cs_callgraph.Node
+	Name          string
+	Nodes         map[int]*DotNode
+	Edges         []*DotEdge
+	ExternalFuncs map[string]*cs_callgraph.Node
 }
-
-
 
 /* ============================================================================
  * isAnonFunc
@@ -34,7 +32,7 @@ type PackageGraph struct {
  * ============================================================================
  */
 func isAnonFunc(fn *cs_callgraph.Node) bool {
-    return fn.Func != nil && strings.Contains(fn.Func.Name(), "$")
+	return fn.Func != nil && strings.Contains(fn.Func.Name(), "$")
 }
 
 /* ============================================================================
@@ -49,36 +47,36 @@ func isAnonFunc(fn *cs_callgraph.Node) bool {
  */
 func BuildDotGraphPerPackage(g *cs_callgraph.Graph) map[string]*DotGraph {
 
-    packageGraphs := map[string]*DotGraph{}
+	packageGraphs := map[string]*DotGraph{}
 
-    for _, n := range g.Nodes {
+	for _, n := range g.Nodes {
 
-        /* -------------------------------------------------------
-         * 1. VALIDATION
-         * ------------------------------------------------------- */
-        if n.Func == nil || n.Func.Pkg == nil || n.Func.Pkg.Pkg == nil {
-            continue
-        }
+		/* -------------------------------------------------------
+		 * 1. VALIDATION
+		 * ------------------------------------------------------- */
+		if n.Func == nil || n.Func.Pkg == nil || n.Func.Pkg.Pkg == nil {
+			continue
+		}
 
-        pkgPath := n.Func.Pkg.Pkg.Path()
+		pkgPath := n.Func.Pkg.Pkg.Path()
 
-        /* -------------------------------------------------------
-         * 2. GRAPH INITIALIZATION
-         * ------------------------------------------------------- */
-        pkgGraph := ensurePackageGraph(packageGraphs, pkgPath)
+		/* -------------------------------------------------------
+		 * 2. GRAPH INITIALIZATION
+		 * ------------------------------------------------------- */
+		pkgGraph := ensurePackageGraph(packageGraphs, pkgPath)
 
-        /* -------------------------------------------------------
-         * 3. LOCAL NODE REGISTRATION
-         * ------------------------------------------------------- */
-        registerLocalNode(pkgGraph, n)
+		/* -------------------------------------------------------
+		 * 3. LOCAL NODE REGISTRATION
+		 * ------------------------------------------------------- */
+		registerLocalNode(pkgGraph, n)
 
-        /* -------------------------------------------------------
-         * 4. EDGE HANDLING
-         * ------------------------------------------------------- */
-        handleEdges(pkgGraph, n, pkgPath)
-    }
+		/* -------------------------------------------------------
+		 * 4. EDGE HANDLING
+		 * ------------------------------------------------------- */
+		handleEdges(pkgGraph, n, pkgPath)
+	}
 
-    return packageGraphs
+	return packageGraphs
 }
 
 /* ============================================================================
@@ -88,17 +86,17 @@ func BuildDotGraphPerPackage(g *cs_callgraph.Graph) map[string]*DotGraph {
  * ============================================================================
  */
 func ensurePackageGraph(
-    graphs map[string]*DotGraph,
-    pkgPath string,
+	graphs map[string]*DotGraph,
+	pkgPath string,
 ) *DotGraph {
 
-    if g, ok := graphs[pkgPath]; ok {
-        return g
-    }
+	if g, ok := graphs[pkgPath]; ok {
+		return g
+	}
 
-    g := newDotGraph()
-    graphs[pkgPath] = g
-    return g
+	g := newDotGraph()
+	graphs[pkgPath] = g
+	return g
 }
 
 /* ============================================================================
@@ -109,13 +107,13 @@ func ensurePackageGraph(
  * ============================================================================
  */
 func registerLocalNode(pkgGraph *DotGraph, n *cs_callgraph.Node) {
-    nodeID := convertNodeID(n.ID, ns_normal)
+	nodeID := convertNodeID(n.ID, ns_normal)
 
-    if _, exists := pkgGraph.Nodes[nodeID]; exists {
-        return
-    }
+	if _, exists := pkgGraph.Nodes[nodeID]; exists {
+		return
+	}
 
-    pkgGraph.Nodes[nodeID] = buildNodeFromCS(n)
+	pkgGraph.Nodes[nodeID] = buildNodeFromCS(n)
 }
 
 /* ============================================================================
@@ -125,15 +123,42 @@ func registerLocalNode(pkgGraph *DotGraph, n *cs_callgraph.Node) {
  * ============================================================================
  */
 func handleEdges(
-    pkgGraph *DotGraph,
-    n *cs_callgraph.Node,
-    pkgPath string,
+	pkgGraph *DotGraph,
+	n *cs_callgraph.Node,
+	pkgPath string,
 ) {
-    for _, e := range n.Out {
-        handleEdge(pkgGraph, n, e, pkgPath)
-    }
+	for _, e := range n.Out {
+		handleEdge(pkgGraph, n, e, pkgPath)
+	}
 }
 
+/* ============================================================================
+ * checkIncompleteCallee
+ * ----------------------------------------------------------------------------
+ * Validates the callee's metadata to ensure it has the necessary SSA and 
+ * type information for graph generation. Returns an error description if 
+ * incomplete, otherwise an empty string.
+ * ============================================================================
+ */
+func checkIncompleteCallee(e *cs_callgraph.Edge) string {
+	if e.Callee == nil {
+		return "Callee Node is nil"
+	}
+	if e.Callee.Func == nil {
+		return "Callee.Func is nil (unresolved dynamic call or intrinsic)"
+	}
+	if e.Callee.Func.Pkg == nil {
+		return fmt.Sprintf(
+			"Callee.Func (%s) has no ssa.Package info", 
+			e.Callee.Func.Name())
+	}
+	if e.Callee.Func.Pkg.Pkg == nil {
+		return fmt.Sprintf(
+			"Callee.Func (%s) has no underlying types.Package",
+			e.Callee.Func.Name())
+	}
+	return ""
+}
 /* ============================================================================
  * handleEdge
  * ----------------------------------------------------------------------------
@@ -144,47 +169,121 @@ func handleEdges(
  * ============================================================================
  */
 func handleEdge(
-    pkgGraph *DotGraph, n *cs_callgraph.Node,
-    e *cs_callgraph.Edge, pkgPath string,
+	pkgGraph 	*DotGraph			, n *cs_callgraph.Node,
+	e 			*cs_callgraph.Edge	, pkgPath string,
 ) {
-     if e.Callee == nil || e.Callee.Func == nil || e.Callee.Func.Pkg == nil || e.Callee.Func.Pkg.Pkg == nil {
-        fmt.Printf("Skipping edge from %s: incomplete callee info\n", shortFuncName(n))
-        return
-    }
-    /* -------------------------------------------------------
-     * 1. ROOT / SPECIAL EDGE HANDLING
-     * ------------------------------------------------------- */
-    if e.Callee == nil || e.Callee.Func == nil {
+	/* -------------------------------------------------------
+	 * 1. PANIC EDGE HANDLING
+	 * ------------------------------------------------------- */
+	if e.Kind == cs_callgraph.PanicEdge {
+		handlePanicEdge(pkgGraph, n, e)
+		return
+	}
 
-        // Guard: e.Callee might be nil (avoid panic)
-        if e.Callee != nil {
-            rootID := convertNodeID(e.Callee.ID, ns_normal)
+	/* -------------------------------------------------------
+	 * 2. VALIDATION & LOGGING
+	 * ------------------------------------------------------- */
+	if errStr := checkIncompleteCallee(e); errStr != "" {
+		callerName := shortFuncName(n)
+		calleeName := "unknown"
+		if e.Callee != nil && e.Callee.Func != nil {
+			calleeName = e.Callee.Func.Name()
+		}
+		fmt.Printf(
+			"[DEBUG] Skipping edge [%s -> %s]: %s\n",
+			callerName, calleeName, errStr,
+		)
+		return
+	}
 
-            if _, exists := pkgGraph.Nodes[rootID]; !exists {
-                pkgGraph.Nodes[rootID] = buildNodeFromCS(e.Callee)
-            }
-        }
+	/* -------------------------------------------------------
+	 * 3. ROOT / SPECIAL EDGE HANDLING
+	 * ------------------------------------------------------- */
+	if e.Callee == nil || e.Callee.Func == nil {
+		handleRootEdge(pkgGraph, e)
+		return
+	}
 
-        pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
-        return
-    }
+	calleePkg := e.Callee.Func.Pkg.Pkg.Path()
 
-    calleePkg := e.Callee.Func.Pkg.Pkg.Path()
+	/* -------------------------------------------------------
+	 * 4. INTRA-PACKAGE EDGE
+	 * ------------------------------------------------------- */
+	if calleePkg == pkgPath {
+		handleIntraPackageEdge(pkgGraph, e)
+		return
+	}
 
-    /* -------------------------------------------------------
-     * 2. INTRA-PACKAGE EDGE
-     * ------------------------------------------------------- */
-    if calleePkg == pkgPath {
-        pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
-        return
-    }
+	/* -------------------------------------------------------
+	 * 5. INTER-PACKAGE EDGE (CLUSTER)
+	 * ------------------------------------------------------- */
+	handleInterPackageEdge(pkgGraph, n, e, calleePkg)
+}
+/* ============================================================================
+ * handlePanicEdge
+ * ----------------------------------------------------------------------------
+ * Routes panic-kind edges to a dedicated visual "sink" node.
+ * ============================================================================
+ */
+func handlePanicEdge(
+	pkgGraph 	*DotGraph, 			n *cs_callgraph.Node, 
+	e 			*cs_callgraph.Edge,
+) {
+	sinkID := "panic_sink"
 
-    /* -------------------------------------------------------
-     * 3. INTER-PACKAGE EDGE (CLUSTER)
-     * ------------------------------------------------------- */
-    buildLinkClusterNode(pkgGraph, &calleePkg, e, n)
+	if _, exists := pkgGraph.Nodes[sinkID]; !exists {
+		pkgGraph.Nodes[sinkID] = buildNode(
+			sinkID, sinkID,
+			sinkID, ns_panic,
+		)
+	}
+
+	pkgGraph.Edges = append(pkgGraph.Edges, buildEdge(
+		convertNodeID(n.ID, ns_normal),
+		sinkID,
+		mapEdgeKindToStyle(cs_callgraph.PanicEdge),
+		e.Description(),
+	))
 }
 
+/* ============================================================================
+ * handleRootEdge
+ * ----------------------------------------------------------------------------
+ * Handles edges where the callee is the root or a special synthetic node.
+ * ============================================================================
+ */
+func handleRootEdge(pkgGraph *DotGraph, e *cs_callgraph.Edge) {
+	if e.Callee != nil {
+		rootID := convertNodeID(e.Callee.ID, ns_normal)
+		if _, exists := pkgGraph.Nodes[rootID]; !exists {
+			pkgGraph.Nodes[rootID] = buildNodeFromCS(e.Callee)
+		}
+	}
+	pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
+}
+
+/* ============================================================================
+ * handleIntraPackageEdge
+ * ----------------------------------------------------------------------------
+ * Handles edges where the caller and callee reside in the same package.
+ * ============================================================================
+ */
+func handleIntraPackageEdge(pkgGraph *DotGraph, e *cs_callgraph.Edge) {
+	pkgGraph.Edges = append(pkgGraph.Edges, buildEdgeFromCS(e))
+}
+
+/* ============================================================================
+ * handleInterPackageEdge
+ * ----------------------------------------------------------------------------
+ * Handles edges that cross package boundaries by creating cluster links.
+ * ============================================================================
+ */
+func handleInterPackageEdge(
+	pkgGraph 	*DotGraph			, n *cs_callgraph.Node, 
+	e 			*cs_callgraph.Edge	, calleePkg string,
+) {
+	buildLinkClusterNode(pkgGraph, &calleePkg, e, n)
+}
 
 /* ============================================================================
  * shortPkgName
@@ -194,8 +293,8 @@ func handleEdge(
  */
 
 func shortPkgName(pkgPath string) string {
-    parts := strings.Split(pkgPath, "/")
-    return parts[len(parts)-1]
+	parts := strings.Split(pkgPath, "/")
+	return parts[len(parts)-1]
 }
 
 /* ============================================================================
@@ -206,10 +305,10 @@ func shortPkgName(pkgPath string) string {
  * ============================================================================
  */
 func shortFuncName(fn *cs_callgraph.Node) string {
-    if fn.Func == nil {
-        return "<root>"
-    }
-    return fn.Func.Name()
+	if fn.Func == nil {
+		return "<root>"
+	}
+	return fn.Func.Name()
 }
 
 /* ============================================================================
@@ -220,10 +319,10 @@ func shortFuncName(fn *cs_callgraph.Node) string {
  * ============================================================================
  */
 func fullFuncName(fn *cs_callgraph.Node) string {
-    if fn.Func == nil {
-        return "<root>"
-    }
-    return fn.Func.String()
+	if fn.Func == nil {
+		return "<root>"
+	}
+	return fn.Func.String()
 }
 
 /* ============================================================================
@@ -235,11 +334,14 @@ func fullFuncName(fn *cs_callgraph.Node) string {
  * ============================================================================
  */
 func convertNodeID(id int, typ NodeStyle) string {
-    switch typ {
-    case ns_external    : return "ext_" + strconv.Itoa(id)
-    default             : return "n"    + strconv.Itoa(id)
-    }
+	switch typ {
+	case ns_external:
+		return "ext_" + strconv.Itoa(id)
+	default:
+		return "n" + strconv.Itoa(id)
+	}
 }
+
 /* ============================================================================
  * buildNodeFromCS
  * ----------------------------------------------------------------------------
@@ -248,17 +350,17 @@ func convertNodeID(id int, typ NodeStyle) string {
  * ============================================================================
  */
 func buildNodeFromCS(n *cs_callgraph.Node) *DotNode {
-    nodeType := ns_normal
-    if isAnonFunc(n) {
-        nodeType = ns_anon
-    }
+	nodeType := ns_normal
+	if isAnonFunc(n) {
+		nodeType = ns_anon
+	}
 
-    return buildNode(
-        convertNodeID   (n.ID, nodeType),
-        shortFuncName   (n),
-        fullFuncName    (n),
-        nodeType,
-    )
+	return buildNode(
+		convertNodeID(n.ID, nodeType),
+		shortFuncName(n),
+		fullFuncName(n),
+		nodeType,
+	)
 }
 
 /* ============================================================================
@@ -269,23 +371,23 @@ func buildNodeFromCS(n *cs_callgraph.Node) *DotNode {
  * ============================================================================
  */
 func buildNode(
-    id string, label string,
-    tooltip string, typ NodeStyle,
+	id string, label string,
+	tooltip string, typ NodeStyle,
 ) *DotNode {
 
-    attrs := map[string]string{
-        "label"     : label,
-        "tooltip"   : tooltip,
-    }
+	attrs := map[string]string{
+		"label":   label,
+		"tooltip": tooltip,
+	}
 
-    if styleMap, ok := global_styles.NodeStyles[string(typ)]; ok {
-        maps.Copy(attrs, styleMap)
-    }
+	if styleMap, ok := global_styles.NodeStyles[string(typ)]; ok {
+		maps.Copy(attrs, styleMap)
+	}
 
-    return &DotNode{
-        ID      : id,
-        Attrs   : attrs,
-    }
+	return &DotNode{
+		ID:    id,
+		Attrs: attrs,
+	}
 }
 
 /* ============================================================================
@@ -295,13 +397,13 @@ func buildNode(
  * ============================================================================
  */
 func mapEdgeKindToStyle(typ cs_callgraph.EdgeKind) EdgeStyle {
-    switch typ {
-    case cs_callgraph.CallEdge  :		return es_call
-    case cs_callgraph.DeferEdge :		return es_defer
-    case cs_callgraph.GoEdge    :		return es_go
-    case cs_callgraph.PanicEdge :		return es_panic
-    default                     :		return es_default
-    }
+	switch typ {
+	case cs_callgraph.CallEdge	:	return es_call
+	case cs_callgraph.DeferEdge	:	return es_defer
+	case cs_callgraph.GoEdge	:	return es_go
+	case cs_callgraph.PanicEdge	:	return es_panic
+	default						:	return es_default
+	}
 }
 
 /* ============================================================================
@@ -311,12 +413,12 @@ func mapEdgeKindToStyle(typ cs_callgraph.EdgeKind) EdgeStyle {
  * ============================================================================
  */
 func buildEdgeFromCS(e *cs_callgraph.Edge) *DotEdge {
-    return buildEdge(
-        convertNodeID(e.Caller.ID, ns_normal),
-        convertNodeID(e.Callee.ID, ns_normal),
-        mapEdgeKindToStyle(e.Kind),
-        e.Description(),
-    )
+	return buildEdge(
+		convertNodeID(e.Caller.ID, ns_normal),
+		convertNodeID(e.Callee.ID, ns_normal),
+		mapEdgeKindToStyle(e.Kind),
+		e.Description(),
+	)
 }
 
 /* ============================================================================
@@ -327,23 +429,23 @@ func buildEdgeFromCS(e *cs_callgraph.Edge) *DotEdge {
  * ============================================================================
  */
 func buildEdge(
-    from string, to string,
-    typ EdgeStyle, des string,
+	from string, to string,
+	typ EdgeStyle, des string,
 ) *DotEdge {
 
-    attrs := map[string]string{
-        "tooltip": des,
-    }
+	attrs := map[string]string{
+		"tooltip": des,
+	}
 
-    if styleMap, ok := global_styles.EdgeStyles[string(typ)]; ok {
-        maps.Copy(attrs, styleMap)
-    }
+	if styleMap, ok := global_styles.EdgeStyles[string(typ)]; ok {
+		maps.Copy(attrs, styleMap)
+	}
 
-    return &DotEdge{
-        From:  from,
-        To:    to,
-        Attrs: attrs,
-    }
+	return &DotEdge{
+		From:  from,
+		To:    to,
+		Attrs: attrs,
+	}
 }
 
 /* ============================================================================
@@ -360,34 +462,34 @@ func buildEdge(
  * ============================================================================
  */
 func buildLinkClusterNode(
-    pkgGraph *DotGraph, calleePkg *string,
-    e *cs_callgraph.Edge, n *cs_callgraph.Node,
+	pkgGraph *DotGraph, calleePkg *string,
+	e *cs_callgraph.Edge, n *cs_callgraph.Node,
 ) {
 
-    cluster := buildCluster(pkgGraph, calleePkg)
-    extNodeID := convertNodeID(e.Callee.ID, ns_external)
+	cluster := buildCluster(pkgGraph, calleePkg)
+	extNodeID := convertNodeID(e.Callee.ID, ns_external)
 
-    /* -------------------------------------------------------
-     * Ensure external node exists in cluster
-     * ------------------------------------------------------- */
-    if _, exists := cluster.Nodes[extNodeID]; !exists {
-        cluster.Nodes[extNodeID] = buildNode(
-            extNodeID,
-            shortFuncName(e.Callee),
-            fullFuncName(e.Callee),
-            ns_external,
-        )
-    }
+	/* -------------------------------------------------------
+	 * Ensure external node exists in cluster
+	 * ------------------------------------------------------- */
+	if _, exists := cluster.Nodes[extNodeID]; !exists {
+		cluster.Nodes[extNodeID] = buildNode(
+			extNodeID,
+			shortFuncName(e.Callee),
+			fullFuncName(e.Callee),
+			ns_external,
+		)
+	}
 
-    /* -------------------------------------------------------
-     * Add edge from internal node -> external node
-     * ------------------------------------------------------- */
-    pkgGraph.Edges = append(pkgGraph.Edges, buildEdge(
-        convertNodeID(n.ID, ns_normal),
-        extNodeID,
-        mapEdgeKindToStyle(e.Kind),
-        e.Description(),
-    ))
+	/* -------------------------------------------------------
+	 * Add edge from internal node -> external node
+	 * ------------------------------------------------------- */
+	pkgGraph.Edges = append(pkgGraph.Edges, buildEdge(
+		convertNodeID(n.ID, ns_normal),
+		extNodeID,
+		mapEdgeKindToStyle(e.Kind),
+		e.Description(),
+	))
 }
 
 /* ============================================================================
@@ -404,34 +506,34 @@ func buildLinkClusterNode(
  */
 func buildCluster(pkgGraph *DotGraph, calleePkg *string) *DotCluster {
 
-    clusterID := fmt.Sprintf("cluster_%s", *calleePkg)
+	clusterID := fmt.Sprintf("cluster_%s", *calleePkg)
 
-    if cluster, exists := pkgGraph.Clusters[clusterID]; exists {
-        return cluster
-    }
+	if cluster, exists := pkgGraph.Clusters[clusterID]; exists {
+		return cluster
+	}
 
-    /* -------------------------------------------------------
-     * Base attributes
-     * ------------------------------------------------------- */
-    attrs := map[string]string{
-        "tooltip": *calleePkg,
-    }
+	/* -------------------------------------------------------
+	 * Base attributes
+	 * ------------------------------------------------------- */
+	attrs := map[string]string{
+		"tooltip": *calleePkg,
+	}
 
-    /* -------------------------------------------------------
-     * Apply global cluster styles
-     * ------------------------------------------------------- */
-    maps.Copy(attrs, global_styles.Cluster)
+	/* -------------------------------------------------------
+	 * Apply global cluster styles
+	 * ------------------------------------------------------- */
+	maps.Copy(attrs, global_styles.Cluster)
 
-    /* -------------------------------------------------------
-     * Create cluster
-     * ------------------------------------------------------- */
-    cluster := &DotCluster{
-        ID:    clusterID,
-        Label: shortPkgName(*calleePkg),
-        Attrs: attrs,
-        Nodes: make(map[string]*DotNode),
-    }
+	/* -------------------------------------------------------
+	 * Create cluster
+	 * ------------------------------------------------------- */
+	cluster := &DotCluster{
+		ID:    clusterID,
+		Label: shortPkgName(*calleePkg),
+		Attrs: attrs,
+		Nodes: make(map[string]*DotNode),
+	}
 
-    pkgGraph.Clusters[clusterID] = cluster
-    return cluster
+	pkgGraph.Clusters[clusterID] = cluster
+	return cluster
 }

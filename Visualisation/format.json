@@ -15,6 +15,13 @@
             "style"     : "filled",
             "color"     : "#444444",
             "fillcolor" : "#f5e6c8"
+        },
+        "panic": {
+            "label":     "PANIC",
+            "shape":     "box",
+            "color":     "#722f37",
+            "style":     "filled",
+            "fontcolor": "white"
         }
     },
     "edgeStyles": {
@@ -37,7 +44,7 @@
             "label"     : "defer"
         },
         "panic": {
-            "color"     : "#d62728",
+            "color"     : "#722f37",
             "style"     : "bold",
             "arrowhead" : "tee",
             "label"     : "panic"
