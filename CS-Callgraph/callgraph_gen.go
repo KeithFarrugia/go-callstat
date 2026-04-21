@@ -1,9 +1,64 @@
 package cs_callgraph
 
 import (
+	"fmt"
+
 	"golang.org/x/tools/go/ssa"
 )
-
+func EffectivePkg(fn *ssa.Function) *ssa.Package {
+    if fn == nil {
+        return nil
+    }
+    if fn.Pkg != nil {
+        return fn.Pkg
+    }
+    if origin := fn.Origin(); origin != nil && origin != fn {
+        if p := EffectivePkg(origin); p != nil {
+            fmt.Printf("[EffectivePkg] %s -> resolved via Origin() (%s) -> pkg: %s\n",
+                fn.Name(), origin.Name(), p.Pkg.Path())
+            return p
+        }
+    }
+    if parent := fn.Parent(); parent != nil {
+        if p := EffectivePkg(parent); p != nil {
+            fmt.Printf("[EffectivePkg] %s -> resolved via Parent() (%s) -> pkg: %s\n",
+                fn.Name(), parent.Name(), p.Pkg.Path())
+            return p
+        }
+    }
+    if refs := fn.Referrers(); refs != nil {
+        for _, ref := range *refs {
+            if encl := ref.Parent(); encl != nil {
+                if p := EffectivePkg(encl); p != nil {
+                    fmt.Printf("[EffectivePkg] %s -> resolved via Referrer (%s in %s) -> pkg: %s\n",
+                        fn.Name(), ref.String(), encl.Name(), p.Pkg.Path())
+                    return p
+                }
+            }
+        }
+    }
+    for _, block := range fn.Blocks {
+        for _, instr := range block.Instrs {
+            if call, ok := instr.(ssa.CallInstruction); ok {
+                if callee := call.Common().StaticCallee(); callee != nil {
+                    fmt.Printf("[EffectivePkg] %s -> scanning body, found callee: %s (Pkg: %v)\n",
+                        fn.Name(), callee.Name(), callee.Pkg)
+                    if p := EffectivePkg(callee); p != nil {
+                        fmt.Printf("[EffectivePkg] %s -> resolved via body callee (%s) -> pkg: %s\n",
+                            fn.Name(), callee.Name(), p.Pkg.Path())
+                        return p
+                    }
+                }
+            }
+        }
+    }
+    fmt.Printf("[EffectivePkg] %s -> FAILED all resolution paths (Pkg=nil, Origin=%v, Parent=%v, Referrers=%d, Blocks=%d)\n",
+        fn.Name(), fn.Origin(), fn.Parent(), func() int {
+            if r := fn.Referrers(); r != nil { return len(*r) }
+            return -1
+        }(), len(fn.Blocks))
+    return nil
+}
 /* ============================================================================
  * resolveServiceableFunc
  * ----------------------------------------------------------------------------
@@ -16,10 +71,14 @@ func resolveServiceableFunc(fn *ssa.Function) *ssa.Function {
     if fn == nil {
         return nil
     }
-    // Origin() returns the generic template for specialized instances
-    // or the original method for synthetic wrappers.
-    if fn.Pkg == nil && fn.Origin() != nil {
-        return fn.Origin()
+    if fn.Pkg != nil {
+        return fn
+    }
+    if origin := fn.Origin(); origin != nil && origin != fn {
+        return resolveServiceableFunc(origin)
+    }
+    if parent := fn.Parent(); parent != nil {
+        return resolveServiceableFunc(parent)
     }
     return fn
 }
@@ -121,7 +180,7 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
 func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
     cg        := InitGraph(nil)
     seen      := map[*ssa.Function]bool{}
-    seenEdges := map[edgeKey]bool{}
+    existingEdges := map[edgeKey]*Edge{}
 
     var visit func(fn *ssa.Function)
     visit = func(fn *ssa.Function) {
@@ -136,9 +195,14 @@ func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
             for _, instr := range block.Instrs {
                 for _, e := range extractEdges(cg, instr) {
                     key := edgeKey{from: callerNode, to: e.node, kind: e.kind}
-                    if !seenEdges[key] {
-                        GenEdge(callerNode, instr, e.node, e.kind)
-                        seenEdges[key] = true
+                    
+                    if edge, exists := existingEdges[key]; exists {
+                        // We've seen this relationship before; just add the new call site
+                        edge.Sites = append(edge.Sites, instr)
+                    } else {
+                        // New relationship; create the edge and track it
+                        newEdge := GenEdge(callerNode, instr, e.node, e.kind)
+                        existingEdges[key] = newEdge
                     }
 
                     if e.node.Func != nil && e.node.Func != fn {

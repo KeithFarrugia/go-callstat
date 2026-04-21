@@ -13,24 +13,34 @@ import (
 
 
 func main() {
-	// --- Load Go packages ---
-	cfg := &packages.Config{
-		Mode: packages.LoadAllSyntax,
-		Dir:  "../dep-usage-test/", // path to your project
-	}
+    cfg := &packages.Config{
+        Mode: packages.LoadAllSyntax,
+        Dir:  "../dep-usage-test/",
+    }
+    pkgs, err := packages.Load(cfg, "./...")
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil {
-		log.Fatal(err)
-	}
+    prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
+    prog.Build()
 
-	// --- Build SSA program ---
-	prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
-	prog.Build()
+    cg := cs_callgraph.BuildExtendedCallGraph2(prog)
 
-	// --- Build call graph ---
-	cg := cs_callgraph.BuildExtendedCallGraph2(prog)
+    skipPkg := map[string]struct{}{
+        "runtime":          {},
+        "runtime/internal": {},
+        "sync":             {},
+    }
 
-	// --- Generate DOT + SVG for each package concurrently (max 4 goroutines) ---
-	visualisation.GenerateDOTAndSVG(cg, "./output/dotfiles", "./output/svgs", 4)
+    if err := visualisation.GenerateHTMLReport(
+        cg,
+        "./output/dot",
+        "./output/svg",
+        "./report.html",
+        4,
+        skipPkg,
+    ); err != nil {
+        log.Fatal(err)
+    }
 }

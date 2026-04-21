@@ -45,7 +45,10 @@ func isAnonFunc(fn *cs_callgraph.Node) bool {
  *   - Links to external package clusters
  * ============================================================================
  */
-func BuildDotGraphPerPackage(g *cs_callgraph.Graph) map[string]*DotGraph {
+func BuildDotGraphPerPackage(
+	g 			*cs_callgraph.Graph, 
+    skipPkg 	map[string]struct{},  
+) map[string]*DotGraph {
 
 	packageGraphs := map[string]*DotGraph{}
 
@@ -54,12 +57,21 @@ func BuildDotGraphPerPackage(g *cs_callgraph.Graph) map[string]*DotGraph {
 		/* -------------------------------------------------------
 		 * 1. VALIDATION
 		 * ------------------------------------------------------- */
-		if n.Func == nil || n.Func.Pkg == nil || n.Func.Pkg.Pkg == nil {
+		if n.Func == nil {
 			continue
 		}
+		pkg := cs_callgraph.EffectivePkg(n.Func)
+		if pkg == nil || pkg.Pkg == nil {
+			continue
+		}
+		pkgPath := pkg.Pkg.Path()
 
-		pkgPath := n.Func.Pkg.Pkg.Path()
-
+        /* -------------------------------------------------------
+         * Skip packages we don't want to visualise
+         * ------------------------------------------------------- */
+        if _, skip := skipPkg[pkgPath]; skip {
+            continue
+        }
 		/* -------------------------------------------------------
 		 * 2. GRAPH INITIALIZATION
 		 * ------------------------------------------------------- */
@@ -141,23 +153,20 @@ func handleEdges(
  * ============================================================================
  */
 func checkIncompleteCallee(e *cs_callgraph.Edge) string {
-	if e.Callee == nil {
-		return "Callee Node is nil"
-	}
-	if e.Callee.Func == nil {
-		return "Callee.Func is nil (unresolved dynamic call or intrinsic)"
-	}
-	if e.Callee.Func.Pkg == nil {
-		return fmt.Sprintf(
-			"Callee.Func (%s) has no ssa.Package info", 
-			e.Callee.Func.Name())
-	}
-	if e.Callee.Func.Pkg.Pkg == nil {
-		return fmt.Sprintf(
-			"Callee.Func (%s) has no underlying types.Package",
-			e.Callee.Func.Name())
-	}
-	return ""
+    if e.Callee == nil {
+        return "Callee Node is nil"
+    }
+    if e.Callee.Func == nil {
+        return "Callee.Func is nil (unresolved dynamic call or intrinsic)"
+    }
+    // Use effectivePkg so synthetic wrappers ($bound, $thunk, etc.) resolve
+    // to their owning package via Origin() / Parent().
+    if cs_callgraph.EffectivePkg(e.Callee.Func) == nil {
+        return fmt.Sprintf(
+            "Callee.Func (%s) has no resolvable package (synthetic with no origin)",
+            e.Callee.Func.Name())
+    }
+    return ""
 }
 /* ============================================================================
  * handleEdge
@@ -204,7 +213,11 @@ func handleEdge(
 		return
 	}
 
-	calleePkg := e.Callee.Func.Pkg.Pkg.Path()
+	calleePkgSSA := cs_callgraph.EffectivePkg(e.Callee.Func)
+    if calleePkgSSA == nil || calleePkgSSA.Pkg == nil {
+        return // shouldn't reach here after checkIncompleteCallee, but be safe
+    }
+    calleePkg := calleePkgSSA.Pkg.Path()
 
 	/* -------------------------------------------------------
 	 * 4. INTRA-PACKAGE EDGE
@@ -466,19 +479,19 @@ func buildLinkClusterNode(
 	e *cs_callgraph.Edge, n *cs_callgraph.Node,
 ) {
 
-	cluster := buildCluster(pkgGraph, calleePkg)
-	extNodeID := convertNodeID(e.Callee.ID, ns_external)
-
+	cluster 	:= buildCluster(pkgGraph, calleePkg)
+	extNodeID 	:= convertNodeID(e.Callee.ID, ns_external)
+	
 	/* -------------------------------------------------------
 	 * Ensure external node exists in cluster
 	 * ------------------------------------------------------- */
 	if _, exists := cluster.Nodes[extNodeID]; !exists {
 		cluster.Nodes[extNodeID] = buildNode(
-			extNodeID,
-			shortFuncName(e.Callee),
-			fullFuncName(e.Callee),
-			ns_external,
-		)
+            extNodeID,
+            shortFuncName(e.Callee),
+            fullFuncName(e.Callee),
+            ns_external,
+        )
 	}
 
 	/* -------------------------------------------------------
@@ -516,7 +529,8 @@ func buildCluster(pkgGraph *DotGraph, calleePkg *string) *DotCluster {
 	 * Base attributes
 	 * ------------------------------------------------------- */
 	attrs := map[string]string{
-		"tooltip": *calleePkg,
+		"tooltip"	: *calleePkg,
+		"URL"		: "pkg://" + *calleePkg,
 	}
 
 	/* -------------------------------------------------------

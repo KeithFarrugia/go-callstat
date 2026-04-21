@@ -65,7 +65,7 @@ type Graph struct {
 
 type Edge struct {
     Caller *Node
-    Site   ssa.Instruction
+    Sites  []ssa.Instruction // Changed from 'Site ssa.Instruction'
     Callee *Node
     Kind   EdgeKind
 }
@@ -156,15 +156,16 @@ func GenEdge(
     site   ssa.Instruction,
     callee *Node,
     kind   EdgeKind,
-) {
+) *Edge {
     e := &Edge{
         Caller: caller,
-        Site:   site,
+        Sites:  []ssa.Instruction{site},
         Callee: callee,
         Kind:   kind,
     }
     caller.Out = append(caller.Out, e)
     callee.In  = append(callee.In , e)
+    return e
 }
 
 /* ============================================================================
@@ -202,29 +203,43 @@ func (e *Edge) String() string {
  * ============================================================================
  */
 func (e *Edge) Description() string {
-    if e.Site == nil {
+    if len(e.Sites) == 0 {
         return "synthetic edge"
     }
 
-    switch e.Site.(type) {
-    case *ssa.Go:
-        return "concurrent " + e.Site.String()
-    case *ssa.Defer:
-        return "deferred " + e.Site.String()
+    var res string
+    for i, site := range e.Sites {
+        var prefix string
+        switch site.(type) {
+        case *ssa.Go:    prefix = "concurrent "
+        case *ssa.Defer: prefix = "deferred "
+        default:         prefix = ""
+        }
+
+        res += prefix + site.String()
+        if i < len(e.Sites)-1 {
+            res += "\n"
+        }
     }
 
-    return e.Site.String()
+    return res
 }
-
 /* ============================================================================
  * Pos
  * ----------------------------------------------------------------------------
- * Returns the source code position of the instruction that created this edge.
+ * Returns the source code position of the first instruction in the site list.
+ * Returns token.NoPos if the edge is synthetic or has no associated sites.
  * ============================================================================
  */
 func (e *Edge) Pos() token.Pos {
-    if e.Site == nil {
+    if len(e.Sites) == 0 {
         return token.NoPos
     }
-    return e.Site.Pos()
+
+    // Returns the position of the primary (first) call site
+    if firstSite := e.Sites[0]; firstSite != nil {
+        return firstSite.Pos()
+    }
+
+    return token.NoPos
 }

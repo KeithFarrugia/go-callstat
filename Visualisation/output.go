@@ -25,7 +25,13 @@ import (
  *   - concurrency: number of goroutines (0 = sequential)
  * ============================================================================
  */
-func GenerateDOTAndSVG(cg *cs_callgraph.Graph, dotDir, svgDir string, concurrency int) {
+func GenerateDOTAndSVG(
+    cg          *cs_callgraph.Graph,
+    dotDir      string,
+    svgDir      string,
+    concurrency int,
+    skipPkg     map[string]struct{},   // <-- add this
+) {
 	/* -------------------------------------------------------
 	 * Ensure styles are loaded once
 	 * ------------------------------------------------------- */
@@ -38,7 +44,7 @@ func GenerateDOTAndSVG(cg *cs_callgraph.Graph, dotDir, svgDir string, concurrenc
 	/* -------------------------------------------------------
 	 * Build DOT graphs per package
 	 * ------------------------------------------------------- */
-	graphs := BuildDotGraphPerPackage(cg)
+	graphs := BuildDotGraphPerPackage(cg, skipPkg)
 
 	/* -------------------------------------------------------
 	 * Ensure output directories exist
