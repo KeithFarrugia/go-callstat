@@ -541,18 +541,17 @@ function switchPackage(pkg, pushBack) {
 
     if (current !== null && pushBack) {
         backStack.push(current);
-        fwdStack.length = 0; 
+        fwdStack.length = 0;
     }
 
     current = pkg;
     empty.style.display = 'none';
     wrapper.innerHTML   = svgData[pkg];
     resetView();
-    wireClicks();
+    // wireClicks(); <-- remove this
 
-    /* sidebar highlight */
     document.querySelectorAll('.pkg-item').forEach(function(el) {
-    el.classList.toggle('active', el.dataset.pkg === pkg);
+        el.classList.toggle('active', el.dataset.pkg === pkg);
     });
 
     document.getElementById('curr_package').textContent = pkg;
@@ -576,21 +575,14 @@ function goFwd() {
  * Wire pkg:// links inside the SVG
  * ============================================================================
  */
-var XLINK = 'http://www.w3.org/1999/xlink';
-
-function wireClicks() {
-    wrapper.querySelectorAll('a').forEach(function(a) {
-        var href = a.getAttribute('href') || a.getAttributeNS(XLINK, 'href') || '';
-        if (!href.startsWith('pkg://')) return;
-            var target = href.slice(6);
-            a.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                switchPackage(target);
-        });
-        a.setAttribute('title', '→ navigate to ' + target);
-    });
-}
+wrapper.addEventListener('click', function(e) {
+    const a = e.target.closest('a[*|href^="pkg://"]');
+    if (!a) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const href = a.getAttribute('href') || a.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+    switchPackage(href.slice(6));
+});
 
 /* ============================================================================ 
  * Sidebar filter

@@ -193,15 +193,6 @@ func handleEdge(
 	 * 2. VALIDATION & LOGGING
 	 * ------------------------------------------------------- */
 	if errStr := checkIncompleteCallee(e); errStr != "" {
-		callerName := shortFuncName(n)
-		calleeName := "unknown"
-		if e.Callee != nil && e.Callee.Func != nil {
-			calleeName = e.Callee.Func.Name()
-		}
-		fmt.Printf(
-			"[DEBUG] Skipping edge [%s -> %s]: %s\n",
-			callerName, calleeName, errStr,
-		)
 		return
 	}
 

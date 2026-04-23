@@ -1,63 +1,51 @@
 package cs_callgraph
 
 import (
-	"fmt"
+	"sync"
 
 	"golang.org/x/tools/go/ssa"
 )
+
+/* ============================================================================
+ * EffectivePkg
+ * ----------------------------------------------------------------------------
+ * Returns the SSA package that logically owns fn. SSA does not always populate
+ * fn.Pkg directly — generic instantiations, synthetic wrappers, and anonymous
+ * functions all leave it nil, with ownership residing on their origin, parent,
+ * or enclosing function instead.
+ *
+ * Resolution order:
+ *   1. fn.Pkg          — direct, fast path
+ *   2. fn.Origin()     — generic instantiation → template function
+ *   3. fn.Parent()     — closure / anonymous function → enclosing function
+ *
+ * Results are memoized in EffectivePkgCache to avoid redundant traversals
+ * across repeated lookups of the same function. Returns nil if no package
+ * can be structurally determined.
+ * ============================================================================
+ */
+var EffectivePkgCache sync.Map // map[*ssa.Function]*ssa.Package
+
 func EffectivePkg(fn *ssa.Function) *ssa.Package {
     if fn == nil {
         return nil
     }
+    if cached, ok := EffectivePkgCache.Load(fn); ok {
+        return cached.(*ssa.Package)
+    }
+
+    var result *ssa.Package
+
     if fn.Pkg != nil {
-        return fn.Pkg
+        result = fn.Pkg
+    } else if origin := fn.Origin(); origin != nil && origin != fn {
+        result = EffectivePkg(origin)
+    } else if parent := fn.Parent(); parent != nil {
+        result = EffectivePkg(parent)
     }
-    if origin := fn.Origin(); origin != nil && origin != fn {
-        if p := EffectivePkg(origin); p != nil {
-            fmt.Printf("[EffectivePkg] %s -> resolved via Origin() (%s) -> pkg: %s\n",
-                fn.Name(), origin.Name(), p.Pkg.Path())
-            return p
-        }
-    }
-    if parent := fn.Parent(); parent != nil {
-        if p := EffectivePkg(parent); p != nil {
-            fmt.Printf("[EffectivePkg] %s -> resolved via Parent() (%s) -> pkg: %s\n",
-                fn.Name(), parent.Name(), p.Pkg.Path())
-            return p
-        }
-    }
-    if refs := fn.Referrers(); refs != nil {
-        for _, ref := range *refs {
-            if encl := ref.Parent(); encl != nil {
-                if p := EffectivePkg(encl); p != nil {
-                    fmt.Printf("[EffectivePkg] %s -> resolved via Referrer (%s in %s) -> pkg: %s\n",
-                        fn.Name(), ref.String(), encl.Name(), p.Pkg.Path())
-                    return p
-                }
-            }
-        }
-    }
-    for _, block := range fn.Blocks {
-        for _, instr := range block.Instrs {
-            if call, ok := instr.(ssa.CallInstruction); ok {
-                if callee := call.Common().StaticCallee(); callee != nil {
-                    fmt.Printf("[EffectivePkg] %s -> scanning body, found callee: %s (Pkg: %v)\n",
-                        fn.Name(), callee.Name(), callee.Pkg)
-                    if p := EffectivePkg(callee); p != nil {
-                        fmt.Printf("[EffectivePkg] %s -> resolved via body callee (%s) -> pkg: %s\n",
-                            fn.Name(), callee.Name(), p.Pkg.Path())
-                        return p
-                    }
-                }
-            }
-        }
-    }
-    fmt.Printf("[EffectivePkg] %s -> FAILED all resolution paths (Pkg=nil, Origin=%v, Parent=%v, Referrers=%d, Blocks=%d)\n",
-        fn.Name(), fn.Origin(), fn.Parent(), func() int {
-            if r := fn.Referrers(); r != nil { return len(*r) }
-            return -1
-        }(), len(fn.Blocks))
-    return nil
+
+    EffectivePkgCache.Store(fn, result)
+    return result
 }
 /* ============================================================================
  * resolveServiceableFunc
@@ -92,16 +80,16 @@ func resolveServiceableFunc(fn *ssa.Function) *ssa.Function {
  */
 func isFuncValue(v ssa.Value) (*ssa.Function, bool) {
     switch v := v.(type) {
-    case *ssa.Function:
-        return resolveServiceableFunc(v), true
+        case *ssa.Function:
+            return resolveServiceableFunc(v), true
 
-    case *ssa.MakeClosure:
-        if fn, ok := v.Fn.(*ssa.Function); ok {
-            return resolveServiceableFunc(fn), true
-        }
+        case *ssa.MakeClosure:
+            if fn, ok := v.Fn.(*ssa.Function); ok {
+                return resolveServiceableFunc(fn), true
+            }
 
-    case *ssa.ChangeType:
-        return isFuncValue(v.X)
+        case *ssa.ChangeType:
+            return isFuncValue(v.X)
     }
     return nil, false
 }
@@ -114,7 +102,6 @@ func isFuncValue(v ssa.Value) (*ssa.Function, bool) {
  */
 func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
     switch i := instr.(type) {
-
     case *ssa.Go:
         call := i.Common()
         if callee := call.StaticCallee(); callee != nil {
@@ -156,6 +143,11 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
         }
         return results
 
+    case *ssa.MapUpdate:
+        if fnVal, ok := isFuncValue(i.Value); ok {
+            return []nodeKind{{cg.GenNode(fnVal), AssignEdge}}
+        }
+        
     case *ssa.Store:
         if fnVal, ok := isFuncValue(i.Val); ok {
             return []nodeKind{{cg.GenNode(fnVal), AssignEdge}}
