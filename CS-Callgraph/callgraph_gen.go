@@ -163,15 +163,20 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
     }
     return nil
 }
+
 /* ============================================================================
  * BuildExtendedCallGraph2
  * ----------------------------------------------------------------------------
  * Entry point for building the graph by visiting all reachable functions.
  * ============================================================================
  */
-func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
-    cg        := InitGraph(nil)
-    seen      := map[*ssa.Function]bool{}
+func BuildExtendedCallGraph2(
+    prog        *ssa.Program,
+    maxDepth    int,
+    depthMap    map[string]int,
+) *Graph {
+    cg           := InitGraph(nil)
+    seen         := map[*ssa.Function]bool{}
     existingEdges := map[edgeKey]*Edge{}
 
     var visit func(fn *ssa.Function)
@@ -179,24 +184,33 @@ func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
         if fn == nil || seen[fn] {
             return
         }
-        seen[fn] = true
 
+        pkg := EffectivePkg(fn)
+        if pkg == nil {
+            return
+        }
+
+        pkgDepth, known := depthMap[pkg.Pkg.Path()]
+        if !known {
+            return // not reachable from project root at all
+        }
+        if maxDepth != -1 && pkgDepth > maxDepth {
+            cg.GenNode(fn) // node exists but body not scanned
+            return
+        }
+
+        seen[fn] = true
         callerNode := cg.GenNode(fn)
 
         for _, block := range fn.Blocks {
             for _, instr := range block.Instrs {
                 for _, e := range extractEdges(cg, instr) {
                     key := edgeKey{from: callerNode, to: e.node, kind: e.kind}
-                    
                     if edge, exists := existingEdges[key]; exists {
-                        // We've seen this relationship before; just add the new call site
                         edge.Sites = append(edge.Sites, instr)
                     } else {
-                        // New relationship; create the edge and track it
-                        newEdge := GenEdge(callerNode, instr, e.node, e.kind)
-                        existingEdges[key] = newEdge
+                        existingEdges[key] = GenEdge(callerNode, instr, e.node, e.kind)
                     }
-
                     if e.node.Func != nil && e.node.Func != fn {
                         visit(e.node.Func)
                     }
@@ -205,8 +219,13 @@ func BuildExtendedCallGraph2(prog *ssa.Program) *Graph {
         }
     }
 
-    // Start traversal from all package-level members
     for _, pkg := range prog.AllPackages() {
+        if pkg.Pkg == nil {
+            continue
+        }
+        if d, ok := depthMap[pkg.Pkg.Path()]; !ok || (maxDepth != -1 && d > maxDepth) {
+            continue
+        }
         for _, mem := range pkg.Members {
             if fn, ok := mem.(*ssa.Function); ok {
                 visit(fn)

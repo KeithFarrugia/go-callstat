@@ -64,6 +64,8 @@ func GenerateHTMLReport(
     htmlOut     string,
     concurrency int,
     skipPkg     map[string]struct{},
+    depthMap    map[string]int,
+    maxDepth    int,
 ) error {
 
     /* -------------------------------------------------------
@@ -102,6 +104,12 @@ func GenerateHTMLReport(
      * 5. GENERATE DOT + SVG FILES
      * ------------------------------------------------------- */
     for _, pkg := range pkgs {
+        if maxDepth != -1 {
+            if d, ok := depthMap[pkg]; !ok || d > maxDepth {
+                continue
+            }
+        }
+
         san     := sanitizePkg(pkg)
         dotPath := filepath.Join(dotDir, san+".dot")
         svgPath := filepath.Join(svgDir, san+".svg")
@@ -120,7 +128,13 @@ func GenerateHTMLReport(
      * ------------------------------------------------------- */
     svgMap := make(map[string]string, len(pkgs))
     for _, pkg := range pkgs {
-        san  := sanitizePkg(pkg)
+        if maxDepth != -1 {
+            if d, ok := depthMap[pkg]; !ok || d > maxDepth {
+                continue
+            }
+        }
+
+        san := sanitizePkg(pkg)
         raw, err := os.ReadFile(filepath.Join(svgDir, san+".svg"))
         if err != nil {
             log.Printf("[WARN] read svg %s: %v", pkg, err)

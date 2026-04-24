@@ -1,5 +1,0 @@
-digraph "" {
-  rankdir=LR;
-  "n2364" [color="#484061", label="init", shape="box", style="solid", tooltip="example.com/depusagetest/something.init"];
-  "n2376" [color="#484061", label="Map", shape="box", style="solid", tooltip="example.com/depusagetest/something.Map"];
-}
