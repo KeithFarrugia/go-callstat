@@ -1,1 +1,5 @@
 /output/
+*.svg
+*.html
+*.png
+*.dot
