@@ -1,8 +1,10 @@
-package visualisation
+package stats
 
 import (
 	cs_callgraph "callstat/CS-Callgraph"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -13,21 +15,22 @@ import (
  * ============================================================================
  */
 type EdgeKindCounts struct {
-	Counts map[cs_callgraph.EdgeKind]int
-	Total  int
+	Counts map[string]int `json:"counts"`
+	Total  int            `json:"total"`
 }
 
 func newEdgeKindCounts() *EdgeKindCounts {
 	return &EdgeKindCounts{
-		Counts	: make(map[cs_callgraph.EdgeKind]int),
-		Total	: 0,
+		Counts: make(map[string]int),
+		Total:  0,
 	}
 }
 
 func (e *EdgeKindCounts) add(kind cs_callgraph.EdgeKind) {
-	e.Counts[kind]++
+	e.Counts[kind.String()]++
 	e.Total++
 }
+
 
 /* ============================================================================
  * CallGraphStats
@@ -36,27 +39,94 @@ func (e *EdgeKindCounts) add(kind cs_callgraph.EdgeKind) {
  * within the configured depth.
  * ============================================================================
  */
-type CallGraphStats struct {
-	TotalFunctions      int
-	ReachableFunctions  int
-	FunctionsPerPackage map[string]int
-	UnusedFunctions     map[string][]string
-	ReachableFuncNames  map[string]struct{}
-	EdgesPerPackage     map[string]*EdgeKindCounts
-	GrandTotalEdges     *EdgeKindCounts
+type PackageStats struct {
+	Path            string          `json:"path"`
+	Depth           int             `json:"depth"`
+	FunctionCount   int             `json:"functionCount"`
+	UnusedFunctions []string        `json:"unusedFunctions"`
+	Edges           *EdgeKindCounts `json:"edges"`
 }
 
-func newCallGraphStats() *CallGraphStats {
-	return &CallGraphStats{
-		TotalFunctions			: 0,
-		ReachableFunctions		: 0,
-		FunctionsPerPackage		: make(map[string]int),
-		UnusedFunctions			: make(map[string][]string),
-		ReachableFuncNames		: make(map[string]struct{}),
-		EdgesPerPackage			: make(map[string]*EdgeKindCounts),
-		GrandTotalEdges			: newEdgeKindCounts(),
+func newPackageStats(path string, depth int) *PackageStats {
+	return &PackageStats{
+		Path            : path,
+		Depth           : depth,
+		UnusedFunctions : []string{},
+		Edges           : newEdgeKindCounts(),
 	}
 }
+
+/* ============================================================================
+ * CallGraphReport
+ * ----------------------------------------------------------------------------
+ * The root reporting structure containing totals and grouped package data.
+ * ============================================================================
+ */
+type CallGraphReport struct {
+	TotalFunctions     int                      `json:"totalFunctions"`
+	ReachableFunctions int                      `json:"reachableFunctions"`
+	MaxDepthSpecified  int                      `json:"maxDepthSpecified"`
+	GrandTotalEdges    *EdgeKindCounts          `json:"grandTotal"`
+	Packages           map[string]*PackageStats `json:"packages"`
+
+	ReachableFuncNames map[string]struct{}      `json:"-"`
+}
+
+func newCallGraphReport(maxDepth int) *CallGraphReport {
+	return &CallGraphReport{
+		MaxDepthSpecified   : maxDepth,
+		GrandTotalEdges     : newEdgeKindCounts(),
+		Packages            : make(map[string]*PackageStats),
+		ReachableFuncNames  : make(map[string]struct{}),
+	}
+}
+
+func (r *CallGraphReport) getPkg(
+    path        string, 
+    depthMap    map[string]int,
+) *PackageStats {
+	if pkg, ok := r.Packages[path]; ok {
+		return pkg
+	}
+	d := -1
+	if depth, ok := depthMap[path]; ok {
+		d = depth
+	}
+	pkg := newPackageStats(path, d)
+	r.Packages[path] = pkg
+	return pkg
+}
+/* ============================================================================
+ * IO Methods
+ * ============================================================================
+ */
+
+func (r *CallGraphReport) ToJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("null"), nil
+	}
+	return json.MarshalIndent(r, "", "  ")
+}
+
+/* ============================================================================
+ * WriteJSONToFile
+ * ----------------------------------------------------------------------------
+ * Marshals the stats and writes them to the specified file path.
+ * Uses 2-space indentation for readability.
+ * ============================================================================
+ */
+func (r *CallGraphReport) WriteJSONToFile(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(r)
+}
+
 
 /* ============================================================================
  * GatherCallGraphStats
@@ -69,22 +139,22 @@ func GatherCallGraphStats(
 	depthMap    map[string]int,
 	maxDepth    int,
 	projectRoot string,
-) *CallGraphStats {
-	stats   := newCallGraphStats()
+) *CallGraphReport {
+	report := newCallGraphReport(maxDepth)
 	inDepth := makeDepthGate(depthMap, maxDepth)
 
-	countFunctions(g, stats, inDepth)
-	countEdges(g, stats, inDepth)
+	countFunctions(g, report, depthMap, inDepth)
+	countEdges(g, report, depthMap, inDepth)
 
-	mainNode := resolveMainNode(g, depthMap, maxDepth, projectRoot, inDepth)
+	mainNode := resolveMainNode(g, depthMap, projectRoot, inDepth)
 	if mainNode != nil {
 		visited := make(map[int]struct{})
-		traverseReachable(mainNode, visited, stats, inDepth)
+		traverseReachable(mainNode, visited, report, inDepth)
 	}
 
-	collectUnused(g, stats, inDepth)
+	collectUnused(g, report, depthMap, inDepth)
 
-	return stats
+	return report
 }
 
 /* ============================================================================
@@ -110,9 +180,8 @@ func makeDepthGate(depthMap map[string]int, maxDepth int) func(string) bool {
  * ============================================================================
  */
 func countFunctions(
-	g       *cs_callgraph.Graph,
-	stats   *CallGraphStats,
-	inDepth func(string) bool,
+    g           *cs_callgraph.Graph , r         *CallGraphReport, 
+    depthMap    map[string]int      , inDepth   func(string) bool,
 ) {
 	for _, n := range g.Nodes {
 		if n.Func == nil {
@@ -126,8 +195,8 @@ func countFunctions(
 		if !inDepth(pkgPath) {
 			continue
 		}
-		stats.TotalFunctions++
-		stats.FunctionsPerPackage[pkgPath]++
+		r.TotalFunctions++
+		r.getPkg(pkgPath, depthMap).FunctionCount++
 	}
 }
 
@@ -139,9 +208,8 @@ func countFunctions(
  * ============================================================================
  */
 func countEdges(
-	g       *cs_callgraph.Graph,
-	stats   *CallGraphStats,
-	inDepth func(string) bool,
+    g           *cs_callgraph.Graph , r         *CallGraphReport, 
+    depthMap    map[string]int      , inDepth   func(string) bool,
 ) {
 	for _, n := range g.Nodes {
 		if n.Func == nil {
@@ -151,8 +219,8 @@ func countEdges(
 		if callerPkg == nil || callerPkg.Pkg == nil {
 			continue
 		}
-		callerPkgPath := callerPkg.Pkg.Path()
-		if !inDepth(callerPkgPath) {
+		callerPath := callerPkg.Pkg.Path()
+		if !inDepth(callerPath) {
 			continue
 		}
 
@@ -160,11 +228,9 @@ func countEdges(
 			if !edgeCalleeInDepth(e, inDepth) {
 				continue
 			}
-			if _, ok := stats.EdgesPerPackage[callerPkgPath]; !ok {
-				stats.EdgesPerPackage[callerPkgPath] = newEdgeKindCounts()
-			}
-			stats.EdgesPerPackage[callerPkgPath].add(e.Kind)
-			stats.GrandTotalEdges.add(e.Kind)
+			p := r.getPkg(callerPath, depthMap)
+			p.Edges.add(e.Kind)
+			r.GrandTotalEdges.add(e.Kind)
 		}
 	}
 }
@@ -198,15 +264,10 @@ func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
  * ============================================================================
  */
 func resolveMainNode(
-	g           *cs_callgraph.Graph,
-	depthMap    map[string]int,
-	maxDepth    int,
-	projectRoot string,
-	inDepth     func(string) bool,
+    g               *cs_callgraph.Graph , depthMap  map[string]int, 
+    projectRoot     string              , inDepth   func(string) bool,
 ) *cs_callgraph.Node {
-
 	var fallback *cs_callgraph.Node
-
 	for _, n := range g.Nodes {
 		if n.Func == nil || n.Func.Name() != "main" {
 			continue
@@ -216,12 +277,13 @@ func resolveMainNode(
 			continue
 		}
 		pkgPath := pkg.Pkg.Path()
-
 		d, ok := depthMap[pkgPath]
-		isInternalMain := ok && d == 0 && strings.HasPrefix(pkgPath, projectRoot)
+		
+        isInternalMain := ok && d == 0 && 
+            strings.HasPrefix(pkgPath, projectRoot)
 
 		if isInternalMain && pkg.Pkg.Name() == "main" {
-			return n // best match, stop immediately
+			return n
 		}
 		if isInternalMain && fallback == nil {
 			fallback = n
@@ -230,7 +292,6 @@ func resolveMainNode(
 			fallback = n
 		}
 	}
-
 	return fallback
 }
 
@@ -242,9 +303,8 @@ func resolveMainNode(
  * ============================================================================
  */
 func collectUnused(
-	g       *cs_callgraph.Graph,
-	stats   *CallGraphStats,
-	inDepth func(string) bool,
+    g           *cs_callgraph.Graph , r         *CallGraphReport, 
+    depthMap    map[string]int      , inDepth   func(string) bool,
 ) {
 	for _, n := range g.Nodes {
 		if n.Func == nil {
@@ -258,10 +318,9 @@ func collectUnused(
 		if !inDepth(pkgPath) {
 			continue
 		}
-		if _, reachable := stats.ReachableFuncNames[n.Func.String()]; !reachable {
-			stats.UnusedFunctions[pkgPath] = append(
-				stats.UnusedFunctions[pkgPath], n.Func.Name(),
-			)
+		if _, reachable := r.ReachableFuncNames[n.Func.String()]; !reachable {
+			p := r.getPkg(pkgPath, depthMap)
+			p.UnusedFunctions = append(p.UnusedFunctions, n.Func.Name())
 		}
 	}
 }
@@ -273,10 +332,8 @@ func collectUnused(
  * ============================================================================
  */
 func traverseReachable(
-	n       *cs_callgraph.Node,
-	visited map[int]struct{},
-	stats   *CallGraphStats,
-	inDepth func(string) bool,
+    n *cs_callgraph.Node, visited map[int]struct{}, 
+    r *CallGraphReport  , inDepth func(string) bool,
 ) {
 	if n == nil || n.Func == nil {
 		return
@@ -291,12 +348,12 @@ func traverseReachable(
 		return
 	}
 
-	stats.ReachableFuncNames[n.Func.String()] = struct{}{}
-	stats.ReachableFunctions++
+	r.ReachableFuncNames[n.Func.String()] = struct{}{}
+	r.ReachableFunctions++
 
 	for _, e := range n.Out {
 		if e.Callee != nil {
-			traverseReachable(e.Callee, visited, stats, inDepth)
+			traverseReachable(e.Callee, visited, r, inDepth)
 		}
 	}
 }
@@ -307,33 +364,26 @@ func traverseReachable(
  * Prints the statistics to stdout.
  * ============================================================================
  */
-func (stats *CallGraphStats) PrintStats() {
-	fmt.Printf("=== CallGraph Statistics ===\n")
-	fmt.Printf("Total functions (in depth): %d\n", stats.TotalFunctions)
-	fmt.Printf("Functions reachable from main: %d\n", stats.ReachableFunctions)
+func (r *CallGraphReport) PrintStats() {
+	fmt.Printf("=== CallGraph Statistics (Max Depth: %d) ===\n", r.MaxDepthSpecified)
+	fmt.Printf("Total functions: %d\n", r.TotalFunctions)
+	fmt.Printf("Reachable functions: %d\n", r.ReachableFunctions)
 
-	fmt.Println("\nFunctions per package:")
-	for pkg, count := range stats.FunctionsPerPackage {
-		fmt.Printf("  %s: %d\n", pkg, count)
-	}
-
-	fmt.Println("\nEdges per package:")
-	for pkg, counts := range stats.EdgesPerPackage {
-		fmt.Printf("  %s (total: %d)\n", pkg, counts.Total)
-		for kind, n := range counts.Counts {
-			fmt.Printf("    %s: %d\n", kind, n)
+	fmt.Println("\nPer-Package Details:")
+	for path, p := range r.Packages {
+		fmt.Printf("  %s (Depth: %d)\n", path, p.Depth)
+		fmt.Printf("    Functions: %d\n", p.FunctionCount)
+		fmt.Printf("    Edges: %d\n", p.Edges.Total)
+		for kind, count := range p.Edges.Counts {
+			fmt.Printf("      - %s: %d\n", kind, count)
+		}
+		if len(p.UnusedFunctions) > 0 {
+			fmt.Printf("    Unused: %v\n", p.UnusedFunctions)
 		}
 	}
 
-	fmt.Printf("\nGrand total edges: %d\n", stats.GrandTotalEdges.Total)
-	for kind, n := range stats.GrandTotalEdges.Counts {
+	fmt.Printf("\nGrand total edges: %d\n", r.GrandTotalEdges.Total)
+	for kind, n := range r.GrandTotalEdges.Counts {
 		fmt.Printf("  %s: %d\n", kind, n)
-	}
-
-	fmt.Println("\nUnused functions per package:")
-	for pkg, funcs := range stats.UnusedFunctions {
-		if len(funcs) > 0 {
-			fmt.Printf("  %s: %v\n", pkg, funcs)
-		}
 	}
 }

@@ -15,6 +15,7 @@ import (
  */
 type EdgeKind int
 
+
 const (
     CallEdge    EdgeKind = iota
     AssignEdge

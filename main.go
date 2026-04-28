@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	cs_callgraph "callstat/CS-Callgraph"
+	stats "callstat/Statistics"
 	visualisation "callstat/Visualisation"
 	"flag"
 	"fmt"
@@ -46,9 +47,13 @@ func GetModuleName(targetDir string) string {
     return ""
 }
 
+
+
+
+
 func main() {
     // 1. Setup Flags
-    depthFlag := flag.Int("depth", -1, "Depth of external package analysis (-1 for infinite)")
+    depthFlag := flag.Int("depth", 1, "Depth of external package analysis (-1 for infinite)")
     targetDir := flag.String("dir", "../dep-usage-test/", "Directory of the project to analyze")
     flag.Parse()
 
@@ -87,6 +92,8 @@ func main() {
         depthMap := cs_callgraph.BuildPackageDepthMap(prog, "example.com/depusagetest")
         cg := cs_callgraph.BuildExtendedCallGraph2(prog, *depthFlag, depthMap)
 
+        stats := stats.GatherCallGraphStats(cg, depthMap, *depthFlag, projectRoot)
+        stats.WriteJSONToFile("output/callgraph_report.json")
         // 6. Visualization
         skipPkg := map[string]struct{}{
             "runtime":          {},
@@ -99,10 +106,12 @@ func main() {
             "./output/dot",
             "./output/svg",
             "./report.html",
-            4,
+            0,
             skipPkg,
             depthMap,
             *depthFlag,
+            "output/callgraph_report.json",
+            projectRoot,
         ); err != nil {
             log.Fatal(err)
         }
