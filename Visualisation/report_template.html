@@ -194,7 +194,6 @@ details[open] > .pkg-group-summary::before {
     background  : #0d1117;
     border-color: #30363d;
     font-weight : bold;
-    z-index     : 2;
     opacity     : 1;
 }
 
@@ -968,45 +967,71 @@ function renderHomeStats() {
 }
 
 /* ============================================================================
- * Package Stats Rendering
+ * Package Stats Rendering (Corrected)
  * ============================================================================
  */
 function renderPkgStats(pkg) {
     const p = stats?.packages?.[pkg];
     if (!p) return '<div class="no-data">Package not found.</div>';
 
-    const unused    = (p.unusedFunctions || []).slice().sort();
-    const reachable = p.functionCount - unused.length;
-    const rPct      = p.functionCount ? (reachable / p.functionCount * 100) : 0;
+    // 1. Setup Counts
+    const unusedList = (p.unusedFunctions || []).slice().sort();
+    const totalCount = p.functionCount || 0;
+    const unreachCount = unusedList.length;
+    const reachCount = totalCount - unreachCount;
+
+    // 2. Calculate Correct Percentages
+    // We want the percentage to match the card it's inside of.
+    const unreachPct = totalCount ? (unreachCount / totalCount * 100) : 0;
+    const reachPct   = totalCount ? (reachCount / totalCount * 100) : 0;
+
     const { labels: eLabels, data: eData } = edgeData(p.edges);
 
+    // 3. Render HTML
     statsPanel.innerHTML = `
     <div class="stats-title">${pkg}</div>
     <div class="cards">
-        ${card(fmt(p.functionCount), 'Functions', 'In package')}
+        ${card(fmt(totalCount), 'Functions', 'In package')}
+        
         ${card(fmt(p.edges?.total), 'Edges', 'Calls', 'c-purple')}
-        ${card(fmt(unused.length), 'Unreachable', rPct.toFixed(1)+'%', 'c-orange')}
-        ${card(fmt(reachable), 'Reachable', 'From main', 'c-green')}
+        
+        ${card(fmt(unreachCount), 'Unreachable', unreachPct.toFixed(1) + '%', 'c-orange')}
+        
+        ${card(fmt(reachCount), 'Reachable', reachPct.toFixed(1) + '%', 'c-green')}
     </div>
+
     <div class="chart-row">
         <div class="chart-box" style="max-width:300px">
             <h3>Edge Kinds</h3>
-            ${eData.length ? '<canvas id="ch-pkg-edges"></canvas>' : 'None'}
+            ${eData.length ? '<canvas id="ch-pkg-edges"></canvas>' : '<div class="no-data">None</div>'}
         </div>
         <div class="chart-box">
-            <h3>Unreachable (${unused.length})</h3>
+            <h3>Unreachable List (${unreachCount})</h3>
             <div class="unused-list">
-                ${unused.map(f => `<div class="unused-fn">${f}</div>`).join('')}
-                ${unused.length === 0 ? '<div class="no-issues">✓ Clean</div>' : ''}
+                ${unusedList.map(f => `<div class="unused-fn">${f}</div>`).join('')}
+                ${unreachCount === 0 ? '<div class="no-issues">✓ Clean</div>' : ''}
             </div>
         </div>
     </div>`;
 
-    if (eData.length) makeChart('ch-pkg-edges', {
-        type: 'doughnut',
-        data: { labels: eLabels, datasets: [{ data: eData, backgroundColor: PALETTE }] },
-        options: { plugins: { legend: { position: 'right' } } }
-    });
+    // 4. Initialize Chart
+    if (eData.length) {
+        makeChart('ch-pkg-edges', {
+            type: 'doughnut',
+            data: { 
+                labels: eLabels, 
+                datasets: [{ 
+                    data: eData, 
+                    backgroundColor: PALETTE 
+                }] 
+            },
+            options: { 
+                plugins: { 
+                    legend: { position: 'right' } 
+                } 
+            }
+        });
+    }
 }
 </script>
 </body>

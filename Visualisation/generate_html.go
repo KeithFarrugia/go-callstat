@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	cs_callgraph "callstat/CS-Callgraph"
 )
@@ -220,6 +221,9 @@ func GenerateHTMLReport(
     /* -------------------------------------------------------
      * 5. GENERATE DOT + SVG FILES
      * ------------------------------------------------------- */
+    fmt.Printf("%-60s | %-12s | %-12s\n", "Package", "DOT Gen", "SVG Gen")
+    fmt.Println(strings.Repeat("-", 90))
+
     for _, pkg := range pkgs {
         if maxDepth != -1 {
             if d, ok := depthMap[pkg]; !ok || d > maxDepth {
@@ -231,13 +235,27 @@ func GenerateHTMLReport(
         dotPath := filepath.Join(dotDir, san+".dot")
         svgPath := filepath.Join(svgDir, san+".svg")
 
+        // Timer for DOT generation (Writing the file)
+        tDotStart := time.Now()
         if err := graphs[pkg].WriteDOTToFile(dotPath); err != nil {
             log.Printf("[WARN] dot write %s: %v", pkg, err)
             continue
         }
+        dotElapsed := time.Since(tDotStart)
+
+        // Timer for SVG generation (Calling the external 'dot' command)
+        tSvgStart := time.Now()
         if err := generateSVG(dotPath, svgPath); err != nil {
             log.Printf("[WARN] svg gen  %s: %v", pkg, err)
         }
+        svgElapsed := time.Since(tSvgStart)
+
+        // Print results for this package
+        fmt.Printf("%-60s | %-12v | %-12v\n", 
+            shortPkgName(pkg), 
+            dotElapsed.Round(time.Millisecond), 
+            svgElapsed.Round(time.Millisecond),
+        )
     }
 
     /* -------------------------------------------------------
