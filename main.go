@@ -19,119 +19,230 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
-// GetModuleName climbs the tree from the target directory to find the go.mod file
-func GetModuleName(targetDir string) string {
-    absDir, err := filepath.Abs(targetDir)
-    if err != nil {
-        return ""
-    }
+/* ============================================================================
+ * stringSlice
+ * ----------------------------------------------------------------------------
+ * A repeatable flag value - each --flag=x appends to the slice.
+ *
+ *   --skip-vis=runtime/ --skip-vis=go/types
+ * ============================================================================
+ */
+type stringSlice []string
 
-    curr := absDir
-    for {
-        modPath := filepath.Join(curr, "go.mod")
-        if _, err := os.Stat(modPath); err == nil {
-            file, _ := os.Open(modPath)
-            defer file.Close()
-            scanner := bufio.NewScanner(file)
-            if scanner.Scan() {
-                line := scanner.Text()
-                return strings.TrimPrefix(line, "module ")
-            }
-        }
-        parent := filepath.Dir(curr)
-        if parent == curr {
-            break
-        }
-        curr = parent
-    }
-    return ""
+func (s *stringSlice) String() string     { return strings.Join(*s, ", ") }
+func (s *stringSlice) Set(v string) error { *s = append(*s, v); return nil }
+
+/* ============================================================================
+ * GetModuleName
+ * ----------------------------------------------------------------------------
+ * Climbs the directory tree from targetDir looking for a go.mod file.
+ * Returns the declared module name, or "" if none is found.
+ *
+ * Uses os.ReadFile to avoid a defer-inside-loop leak.
+ * ============================================================================
+ */
+func GetModuleName(targetDir string) string {
+	absDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return ""
+	}
+	for curr := absDir; ; curr = filepath.Dir(curr) {
+		data, err := os.ReadFile(filepath.Join(curr, "go.mod"))
+		if err == nil {
+			scanner := bufio.NewScanner(strings.NewReader(string(data)))
+			if scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				return strings.TrimPrefix(line, "module ")
+			}
+		}
+		if parent := filepath.Dir(curr); parent == curr {
+			break
+		}
+	}
+	return ""
 }
 
+/* ============================================================================
+ * isStdlib
+ * ----------------------------------------------------------------------------
+ * Reports whether pkgPath belongs to the Go standard library.
+ * stdlib paths have no dot in the first path segment (e.g. "fmt", "go/types").
+ * ============================================================================
+ */
+func isStdlib(pkgPath string) bool {
+	first := strings.SplitN(pkgPath, "/", 2)[0]
+	return !strings.Contains(first, ".")
+}
 
+/* ============================================================================
+ * matchesPattern
+ * ----------------------------------------------------------------------------
+ * Reports whether pkgPath matches any pattern in the list.
+ *
+ * Two match modes:
+ *   "runtime"   exact match — only "runtime" itself
+ *   "runtime/"  prefix match — "runtime", "runtime/internal", etc.
+ * ============================================================================
+ */
+func matchesPattern(pkgPath string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.HasSuffix(p, "/") {
+			base := strings.TrimSuffix(p, "/")
+			if pkgPath == base || strings.HasPrefix(pkgPath, base+"/") {
+				return true
+			}
+		} else if pkgPath == p {
+			return true
+		}
+	}
+	return false
+}
 
+/* ============================================================================
+ * buildSkipMap
+ * ----------------------------------------------------------------------------
+ * Expands a list of patterns (and optionally all stdlib packages) into a
+ * concrete map[pkgPath]struct{} by testing every known package path.
+ * ============================================================================
+ */
+func buildSkipMap(
+	patterns      []string,
+	excludeStdlib bool,
+	allPkgPaths   []string,
+) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, path := range allPkgPaths {
+		patternMatch := matchesPattern(path, patterns)
+		stdlibMatch  := excludeStdlib && isStdlib(path)
+		if patternMatch || stdlibMatch {
+			result[path] = struct{}{}
+		}
+	}
+	return result
+}
 
-
+/* ============================================================================
+ * main
+ * ============================================================================
+ */
 func main() {
-    // 1. Setup Flags
-    depthFlag := flag.Int("depth", 1, "Depth of external package analysis (-1 for infinite)")
-    targetDir := flag.String("dir", "../go-callvis/", "Directory of the project to analyze")
-    flag.Parse()
+	/* -------------------------------------------------------
+	 * Flags
+	 * ------------------------------------------------------- */
+	var skipCGPatterns  stringSlice
+	var skipVisPatterns stringSlice
 
-    projectRoot := GetModuleName(*targetDir)
-    if projectRoot == "" {
-        log.Printf("Warning: Could not find go.mod in %s or parents.", *targetDir)
-    } else {
-        fmt.Printf("[info] Detected project root: %s\n", projectRoot)
+	depthFlag := flag.Int("depth", 2,
+		"Depth of external package traversal (-1 = unlimited)")
+	targetDir := flag.String("dir", "../dep-usage-test/",
+		"Directory of the project to analyse")
+	reportOut := flag.String("report", "./report.html",
+		"Path for the HTML report output")
+	dotDir := flag.String("dot-dir", "./output/dot",
+		"Directory for intermediate DOT files")
+	svgDir := flag.String("svg-dir", "./output/svg",
+		"Directory for intermediate SVG files")
+	statsOut := flag.String("stats", "./output/callgraph_report.json",
+		"Path for the stats JSON output")
+	noStdlib := flag.Bool("no-stdlib", false,
+		"Exclude the standard library from callgraph traversal")
+    
+    noStats := flag.Bool("no-stats", false, 
+        "Disable statistics calculation and JSON output")
+    noVis := flag.Bool("no-vis", false, 
+        "Disable DOT/SVG generation and visualization parts")
+
+	flag.Var(&skipCGPatterns, "skip-cg",
+		"Exclude from callgraph (repeatable; trailing / = prefix match)")
+	flag.Var(&skipVisPatterns, "skip-vis",
+		"Exclude from visualisation (repeatable; trailing / = prefix match)")
+	flag.Parse()
+	/* -------------------------------------------------------
+	 * Project root detection
+	 * ------------------------------------------------------- */
+	projectRoot := GetModuleName(*targetDir)
+	if projectRoot == "" {
+		log.Printf("[warn] could not find go.mod in %s or parents", *targetDir)
+	} else {
+		fmt.Printf("[info] project root: %s\n", projectRoot)
+	}
+
+	/* -------------------------------------------------------
+	 * Benchmark loop
+	 * ------------------------------------------------------- */
+
+    cs_callgraph.EffectivePkgCache = sync.Map{}
+    totalTimeStart := time.Now()
+
+    /* -------------------------------------------------------
+    * Load Packages
+    * ------------------------------------------------------- */
+    t := time.Now()
+    pkgs, err := packages.Load(&packages.Config{
+        Mode: packages.LoadAllSyntax,
+        Dir:  *targetDir,
+    }, "./...")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("[timer] package load  %v\n", time.Since(t))
+
+    /* -------------------------------------------------------
+    * Build SSA
+    * ------------------------------------------------------- */
+    t = time.Now()
+    prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
+    prog.Build()
+    fmt.Printf("[timer] SSA build     %v\n", time.Since(t))
+
+    // — Collect all known package paths for skip expansion
+    allPkgPaths := make([]string, 0, len(prog.AllPackages()))
+    for _, pkg := range prog.AllPackages() {
+        if pkg.Pkg != nil {
+            allPkgPaths = append(allPkgPaths, pkg.Pkg.Path())
+        }
     }
 
-    const runs = 1
-    var totalMs int64
+    /* -------------------------------------------------------
+    * Callgraph
+    * ------------------------------------------------------- */
+    t = time.Now()
+    skipCGMap := buildSkipMap(skipCGPatterns, *noStdlib, allPkgPaths)
+    depthMap  := cs_callgraph.BuildPackageDepthMap(prog, projectRoot)
+    cg        := cs_callgraph.BuildExtendedCallGraph2(
+        prog, *depthFlag, depthMap, skipCGMap,
+    )
+    fmt.Printf("[timer] callgraph     %v\n", time.Since(t))
 
-    for i := 0; i < runs; i++ {
-        cs_callgraph.EffectivePkgCache = sync.Map{}
-        loopStart := time.Now()
+    /* -------------------------------------------------------
+    * Statistics
+    * ------------------------------------------------------- */
+    if !*noStats {
+        t = time.Now()
+        statsObj := stats.GatherCallGraphStats(
+            cg, depthMap, *depthFlag, projectRoot,
+        )
+        statsObj.WriteJSONToFile(*statsOut)
+        fmt.Printf("[timer] statistics    %v\n", time.Since(t))
+    }
 
-        // --- STAGE 1: LOAD PACKAGES ---
-        tLoad := time.Now()
-        cfg := &packages.Config{
-            Mode: packages.LoadAllSyntax,
-            Dir:  *targetDir,
-        }
-        pkgs, err := packages.Load(cfg, "./...")
-        if err != nil {
-            log.Fatal(err)
-        }
-        fmt.Printf("[timer] Package Load: %v\n", time.Since(tLoad))
-
-        // --- STAGE 2: BUILD SSA ---
-        tSSA := time.Now()
-        prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
-        prog.Build()
-        fmt.Printf("[timer] SSA Build:    %v\n", time.Since(tSSA))
-
-        // --- STAGE 3: CALLGRAPH GENERATION ---
-        tCG := time.Now()
-        depthMap := cs_callgraph.BuildPackageDepthMap(prog, projectRoot)
-        cg := cs_callgraph.BuildExtendedCallGraph2(prog, *depthFlag, depthMap)
-        fmt.Printf("[timer] CallGraph:   %v\n", time.Since(tCG))
-
-        // --- STAGE 4: STATISTICS ---
-        tStats := time.Now()
-        statsObj := stats.GatherCallGraphStats(cg, depthMap, *depthFlag, projectRoot)
-        statsObj.WriteJSONToFile("output/callgraph_report.json")
-        fmt.Printf("[timer] Statistics:  %v\n", time.Since(tStats))
-
-        // --- STAGE 5: VISUALIZATION (The Concurrent Part) ---
-        tVis := time.Now()
-        skipPkg := map[string]struct{}{
-            "runtime":          {},
-            "runtime/internal": {},
-            "sync":             {},
-            "go_types":         {},
-            "types":            {},
-        }
-        
+    /* -------------------------------------------------------
+    * Visualisation
+    * ------------------------------------------------------- */
+    if !*noVis {
+        t = time.Now()
+        skipVisMap := buildSkipMap(skipVisPatterns, false, allPkgPaths)
         err = visualisation.GenerateHTMLReport(
-            cg,
-            "./output/dot",
-            "./output/svg",
-            "./report.html",
-            0, // Your concurrency factor
-            skipPkg,
-            depthMap,
-            *depthFlag,
-            "output/callgraph_report.json",
-            projectRoot,
+            cg, *dotDir, *svgDir, *reportOut,
+            0, skipVisMap, depthMap, *depthFlag, *statsOut, projectRoot,
         )
         if err != nil {
             log.Fatal(err)
         }
-        fmt.Printf("[timer] Visuals:     %v\n", time.Since(tVis))
-
-        elapsed := time.Since(loopStart).Milliseconds()
-        fmt.Printf("[run %2d] Total: %dms\n", i+1, elapsed)
-        totalMs += elapsed
+        fmt.Printf("[timer] visualisation %v\n", time.Since(t))
     }
 
-    fmt.Printf("\n[average] %dms over %d runs\n", totalMs/runs, runs)
+    totalTimeFinished := time.Since(totalTimeStart).Milliseconds()
+
+	fmt.Printf("\n[average] %dms", totalTimeFinished)
 }

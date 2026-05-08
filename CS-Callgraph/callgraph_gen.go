@@ -90,6 +90,9 @@ func isFuncValue(v ssa.Value) (*ssa.Function, bool) {
 
         case *ssa.ChangeType:
             return isFuncValue(v.X)
+
+        case *ssa.MakeInterface:
+            return isFuncValue(v.X)
     }
     return nil, false
 }
@@ -118,15 +121,24 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
         call := i.Common()
         var results []nodeKind
 
-        // The primary callee
+        // 1. Static Callee (Direct calls)
         if callee := call.StaticCallee(); callee != nil {
             target := resolveServiceableFunc(callee)
             results = append(results, nodeKind{cg.GenNode(target), CallEdge})
-        } else if fnVal, ok := isFuncValue(call.Value); ok {
-            results = append(results, nodeKind{cg.GenNode(fnVal), CallEdge})
+        } else {
+            // 2. Method selection / Bound methods (This is Bob!)
+            // We check the Value directly if it's a function
+            if fnVal, ok := isFuncValue(call.Value); ok {
+                results = append(results, nodeKind{cg.GenNode(fnVal), CallEdge})
+            } else if call.Method != nil {
+                // 3. Fallback: Search the program for the method implementation
+                if fn := i.Parent().Prog.FuncValue(call.Method); fn != nil {
+                    results = append(results, nodeKind{cg.GenNode(resolveServiceableFunc(fn)), CallEdge})
+                }
+            }
         }
 
-        // Functional arguments (e.g., passing a callback)
+        // Functional arguments (callbacks)
         for _, arg := range call.Args {
             if fnVal, ok := isFuncValue(arg); ok {
                 results = append(results, nodeKind{cg.GenNode(fnVal), AssignEdge})
@@ -160,7 +172,13 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
         if fnVal, ok := isFuncValue(i.X); ok {
             return []nodeKind{{cg.GenNode(fnVal), SendEdge}}
         }
+    case *ssa.TypeAssert:
+        // Detects: f := val.(func())
+        if fnVal, ok := isFuncValue(i.X); ok {
+            return []nodeKind{{cg.GenNode(fnVal), AssignEdge}}
+        }
     }
+    
     return nil
 }
 
@@ -171,31 +189,63 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
  * ============================================================================
  */
 func BuildExtendedCallGraph2(
-    prog        *ssa.Program,
-    maxDepth    int,
-    depthMap    map[string]int,
+    prog     *ssa.Program,
+    maxDepth int,
+    depthMap map[string]int,
+    skipPkg  map[string]struct{},
 ) *Graph {
-    cg           := InitGraph(nil)
-    seen         := map[*ssa.Function]bool{}
+    cg            := InitGraph(nil)
+    seen          := map[*ssa.Function]bool{}
     existingEdges := map[edgeKey]*Edge{}
 
-    var visit func(fn *ssa.Function)
+    /* -------------------------------------------------------
+     * pkgStatus centralises the two questions asked in both
+     * the seed loop and visit:
+     *   known       - package is reachable from project root
+     *                 and not on the skip list
+     *   withinDepth - package body should actually be scanned
+     * ------------------------------------------------------- */
+    pkgStatus := func(pkgPath string) (known, withinDepth bool) {
+        if _, skip := skipPkg[pkgPath]; skip {
+            return false, false
+        }
+        d, ok := depthMap[pkgPath]
+        if !ok {
+            return false, false
+        }
+        return true, maxDepth == -1 || d <= maxDepth
+    }
+    
+    /* -------------------------------------------------------
+     * visit recursively walks the call graph from fn outward.
+     *
+     * Guards (in order):
+     *   1. nil / already-seen  — prevents cycles and nil deref
+     *   2. EffectivePkg        — skips unresolvable synthetics
+     *   3. pkgStatus.known     — skips out-of-scope packages
+     *   4. pkgStatus.withinDepth — stubs deep nodes (GenNode
+     *                             only, body not scanned)
+     *
+     * For each in-scope function, all outgoing edges are
+     * extracted and deduplicated via existingEdges before
+     * recursing into each callee.
+     * ------------------------------------------------------- */
+    var visit func(*ssa.Function)
     visit = func(fn *ssa.Function) {
         if fn == nil || seen[fn] {
             return
         }
-
         pkg := EffectivePkg(fn)
         if pkg == nil {
             return
         }
 
-        pkgDepth, known := depthMap[pkg.Pkg.Path()]
+        known, withinDepth := pkgStatus(pkg.Pkg.Path())
         if !known {
-            return // not reachable from project root at all
+            return
         }
-        if maxDepth != -1 && pkgDepth > maxDepth {
-            cg.GenNode(fn) // node exists but body not scanned
+        if !withinDepth {
+            cg.GenNode(fn)
             return
         }
 
@@ -223,7 +273,8 @@ func BuildExtendedCallGraph2(
         if pkg.Pkg == nil {
             continue
         }
-        if d, ok := depthMap[pkg.Pkg.Path()]; !ok || (maxDepth != -1 && d > maxDepth) {
+        known, withinDepth := pkgStatus(pkg.Pkg.Path())
+        if !known || !withinDepth {
             continue
         }
         for _, mem := range pkg.Members {
