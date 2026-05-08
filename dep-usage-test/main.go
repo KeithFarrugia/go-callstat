@@ -3,128 +3,143 @@ package main
 import "example.com/depusagetest/something"
 
 /* ============================================================================
- * Function Registry (Leaves)
+ * Function registry
  * ----------------------------------------------------------------------------
- * These remain the targets of our edges.
+ * Each function below is the primary subject of exactly one case in
+ * extractEdges. Internal calls within a function's own body are not
+ * counted as "uses" for this mapping.
+ *
+ *   cleanup    → *ssa.Defer       deferred named function
+ *   worker     → *ssa.Go          goroutine static callee
+ *   square     → CallInstruction  direct static call
+ *   add        → CallInstruction  passed as callback argument
+ *   bob.Ping   → CallInstruction  method on concrete type
+ *   p.Ping     → CallInstruction  interface dispatch
+ *   triangle   → *ssa.Return      returned as a function value
+ *   rect       → *ssa.MapUpdate   stored as a map value
+ *   scale      → *ssa.Store       written to package-level var
+ *   maybePanic → *ssa.Panic       body contains the panic instruction
+ *   halve      → *ssa.Send        sent over a function-typed channel
+ *   double     → *ssa.TypeAssert  held in interface{}, asserted back
  * ============================================================================
  */
 
-func cleanup()                                    { _ = 0 }
-func add(a, b int) int                            { return a + b }
-func applyInt(f func(int, int) int, a, b int) int { return f(a, b) }
-func square(x float32) float32                    { return x * x }
-func triangle(b, h float32) float32               { return 0.5 * b * h }
-func rect(w, h float32) float32                   { return w * h }
-func scale(x, _ float32) float32                  { return x * 2 }
-func halve(x, _ float32) float32                  { return x / 2 }
-func cubed(x int) int                             { return x * x * x }
-func double(x int) int                            { return x * 2 }
+func cleanup()                                         	{ _ = 0 }
+func add(a, b int) int                                 	{ return a + b }
+func applyInt(f func(int, int) int, a, b int) int      	{ return f(a, b) }
+func square(x float32) float32                         	{ return x * x }
+func triangle(b, h float32) float32                   	{ return 0.5 * b * h }
+func rect(w, h float32) float32                        	{ return w * h }
+func scale(x, _ float32) float32                       	{ return x * 2 }
+func halve(x, _ float32) float32                       	{ return x / 2 }
+func cubed(x int)	int							{ return x*x*x }
+func double(x int) int                                 	{ return x * 2 }
+
+func worker(_ int, jobs <-chan int, results chan<- int) {
+    for j := range jobs {
+        results <- j * j
+    }
+}
+
+func callOthers() func(float32, float32) float32 {
+    return triangle
+}
+
+func maybePanic(x int) int {
+    if x < 0 {
+        panic("negative value")
+    }
+    return x
+}
 
 var storedFn func(float32, float32) float32
+
 type Pinger interface{ Ping() }
 
-/* ============================================================================
- * Orchestration Layer (Depth 1)
- * ----------------------------------------------------------------------------
- * main calls these. They then call the target functions.
- * ============================================================================
- */
+func main() {
+    jobs   := make(chan int)
+    results := make(chan int)
+    fnChan := make(chan func(float32, float32) float32, 1)
 
-func runConcurrencyTests(jobs chan int, results chan int) {
+    /* -------------------------------------------------------
+    * *ssa.Defer: DeferEdge -> cleanup
+    * ------------------------------------------------------- */
+    defer cleanup()
+
     /* -------------------------------------------------------
     * *ssa.Go: GoEdge -> worker
     * ------------------------------------------------------- */
     go worker(1, jobs, results)
-
+    go worker(2, jobs, results)
+	
     /* -------------------------------------------------------
-    * Anonymous Functions & Static Calls -> cubed
+    * Anonymous Functions with Static call -> cubed
     * ------------------------------------------------------- */
     go func() {
         defer close(jobs)
         jobs <- cubed(2)
+        jobs <- cubed(3)
     }()
-}
+    _, _ = <-results, <-results
 
-func runDispatchTests() {
     /* -------------------------------------------------------
-    * ssa.CallInstruction: concrete vs interface dispatch
+    * ssa.CallInstruction: static call -> square
+    * ------------------------------------------------------- */
+    _ = square(4.0)
+
+    /* -------------------------------------------------------
+    * ssa.CallInstruction: method on concrete type -> bob.Ping
     * ------------------------------------------------------- */
     bob := &something.Bob{}
-    bob.Ping() // Concrete
+    bob.Ping()
 
-    var p Pinger = bob
-    p.Ping() // Interface
-}
-
-func runFunctionalTests(fnChan chan func(float32, float32) float32) {
     /* -------------------------------------------------------
-    * Higher-order logic: Argument passing & Map updates
+    * ssa.CallInstruction: functional argument -> add
     * ------------------------------------------------------- */
     _ = applyInt(add, 2, 3)
 
-    fnMap := map[string]func(float32, float32) float32{"rect": rect}
+    /* -------------------------------------------------------
+    * *ssa.Return: AssignEdge -> triangle
+    * ------------------------------------------------------- */
+    fn := callOthers()
+    _ = fn
+
+    /* -------------------------------------------------------
+    * *ssa.MapUpdate: AssignEdge -> rect
+    * ------------------------------------------------------- */
+    fnMap := map[string]func(float32, float32) float32{}
+    fnMap["rect"] = rect
     _ = fnMap
 
     /* -------------------------------------------------------
-    * Channels and Globals: Send & Store
+    * *ssa.Store: AssignEdge -> scale
+    * ------------------------------------------------------- */
+    storedFn = scale
+    _ = storedFn
+
+    /* -------------------------------------------------------
+    * *ssa.Panic: PanicEdge (emitted from maybePanic body)
+    * ------------------------------------------------------- */
+    _ = maybePanic(1)
+
+    /* -------------------------------------------------------
+    * *ssa.Send: SendEdge -> halve
     * ------------------------------------------------------- */
     fnChan <- halve
-    storedFn = scale
-}
+    _ = <-fnChan
 
-func runEdgeCaseTests() {
     /* -------------------------------------------------------
-    * Type Assertion & Panic
+    * *ssa.TypeAssert: AssignEdge -> double
     * ------------------------------------------------------- */
     var anyFn interface{} = double
     if f, ok := anyFn.(func(int) int); ok {
         _ = f
     }
 
-    _ = maybePanic(1)
-}
-
-/* ============================================================================
- * Support Functions
- * ============================================================================
- */
-
-func worker(_ int, jobs <-chan int, results chan<- int) {
-    for j := range jobs { results <- j * j }
-}
-
-func maybePanic(x int) int {
-    if x < 0 { panic("negative value") }
-    return x
-}
-
-/* ============================================================================
- * Main (Entry Point)
- * ============================================================================
- */
-
-func main() {
-    // ── *ssa.Defer ───────────────────────────────────────────────
-    defer cleanup()
-
-    // ── Setup Channels ──────────────────────────────────────────
-    jobs := make(chan int)
-    results := make(chan int)
-    fnChan := make(chan func(float32, float32) float32, 1)
-
-    // ── Execute Depth 1 Functions ────────────────────────────────
-    runConcurrencyTests(jobs, results)
-    runDispatchTests()
-    runFunctionalTests(fnChan)
-    runEdgeCaseTests()
-
-    // ── Generics Test (Directly in main for variety) ─────────────
+	/* -------------------------------------------------------
+    * Generics / Templates: GenericBob[int].Process
+    * Tests: resolveServiceableFunc unwrapping instantiations
+    * ------------------------------------------------------- */
     gBob := &something.GenericBob[int]{Data: 42}
     gBob.Process(10)
-
-    // Drain results to prevent hang
-    select {
-    case <-results:
-    default:
-    }
 }
