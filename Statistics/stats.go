@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -69,16 +70,19 @@ type CallGraphReport struct {
 	GrandTotalEdges    *EdgeKindCounts          `json:"grandTotal"`
 	Packages           map[string]*PackageStats `json:"packages"`
 
+	Indirect           *IndirectAnalysisReport	`json:"indirect"`
+
 	ReachableFuncNames map[string]struct{}      `json:"-"`
 }
 
 func newCallGraphReport(maxDepth int) *CallGraphReport {
-	return &CallGraphReport{
-		MaxDepthSpecified   : maxDepth,
-		GrandTotalEdges     : newEdgeKindCounts(),
-		Packages            : make(map[string]*PackageStats),
-		ReachableFuncNames  : make(map[string]struct{}),
-	}
+    return &CallGraphReport{
+        MaxDepthSpecified:  maxDepth,
+        GrandTotalEdges:    newEdgeKindCounts(),
+        Packages:           make(map[string]*PackageStats),
+        ReachableFuncNames: make(map[string]struct{}),
+        Indirect:           newIndirectReport(),
+    }
 }
 
 func (r *CallGraphReport) getPkg(
@@ -116,6 +120,12 @@ func (r *CallGraphReport) ToJSON() ([]byte, error) {
  * ============================================================================
  */
 func (r *CallGraphReport) WriteJSONToFile(filename string) error {
+	dir := filepath.Dir(filename)
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -135,28 +145,28 @@ func (r *CallGraphReport) WriteJSONToFile(filename string) error {
  * ============================================================================
  */
 func GatherCallGraphStats(
-	g           *cs_callgraph.Graph,
-	depthMap    map[string]int,
-	maxDepth    int,
-	projectRoot string,
+    g           *cs_callgraph.Graph,
+    depthMap    map[string]int,
+    maxDepth    int,
+    projectRoot string,
 ) *CallGraphReport {
-	report := newCallGraphReport(maxDepth)
-	inDepth := makeDepthGate(depthMap, maxDepth)
+    report := newCallGraphReport(maxDepth)
+    inDepth := makeDepthGate(depthMap, maxDepth)
 
-	countFunctions(g, report, depthMap, inDepth)
-	countEdges(g, report, depthMap, inDepth)
+    countFunctions(g, report, depthMap, inDepth)
+    countEdges(g, report, depthMap, inDepth)
 
-	mainNode := resolveMainNode(g, depthMap, projectRoot, inDepth)
-	if mainNode != nil {
-		visited := make(map[int]struct{})
-		traverseReachable(mainNode, visited, report, inDepth)
-	}
+    mainNode := resolveMainNode(g, depthMap, projectRoot, inDepth)
+    if mainNode != nil {
+        visited := make(map[int]struct{})
+        // This now does both: marks reachable AND analyzes instructions
+        traverseReachable(mainNode, visited, report, inDepth)
+    }
 
-	collectUnused(g, report, depthMap, inDepth)
-
-	return report
+    collectUnused(g, report, depthMap, inDepth)
+	report.Indirect = GatherResearchStats(g, depthMap, maxDepth, projectRoot);
+    return report
 }
-
 /* ============================================================================
  * makeDepthGate
  * ----------------------------------------------------------------------------
@@ -332,30 +342,33 @@ func collectUnused(
  * ============================================================================
  */
 func traverseReachable(
-    n *cs_callgraph.Node, visited map[int]struct{}, 
-    r *CallGraphReport  , inDepth func(string) bool,
+    n *cs_callgraph.Node, 
+    visited map[int]struct{}, 
+    r *CallGraphReport, 
+    inDepth func(string) bool,
 ) {
-	if n == nil || n.Func == nil {
-		return
-	}
-	if _, ok := visited[n.ID]; ok {
-		return
-	}
-	visited[n.ID] = struct{}{}
+    if n == nil || n.Func == nil {
+        return
+    }
+    if _, ok := visited[n.ID]; ok {
+        return
+    }
+    visited[n.ID] = struct{}{}
 
-	pkg := cs_callgraph.EffectivePkg(n.Func)
-	if pkg == nil || pkg.Pkg == nil || !inDepth(pkg.Pkg.Path()) {
-		return
-	}
+    pkg := cs_callgraph.EffectivePkg(n.Func)
+    if pkg == nil || pkg.Pkg == nil || !inDepth(pkg.Pkg.Path()) {
+        return
+    }
 
-	r.ReachableFuncNames[n.Func.String()] = struct{}{}
-	r.ReachableFunctions++
+    // 1. Existing Logic: Mark Reachability
+    r.ReachableFuncNames[n.Func.String()] = struct{}{}
+    r.ReachableFunctions++
 
-	for _, e := range n.Out {
-		if e.Callee != nil {
-			traverseReachable(e.Callee, visited, r, inDepth)
-		}
-	}
+    for _, e := range n.Out {
+        if e.Callee != nil {
+            traverseReachable(e.Callee, visited, r, inDepth)
+        }
+    }
 }
 
 /* ============================================================================

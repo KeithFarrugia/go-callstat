@@ -139,6 +139,7 @@ details[open] > .pkg-group-summary::before {
 }
 
 #leftbar {
+    margin-left: 1rem;
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -510,6 +511,30 @@ tr:hover td { background: #1c2128; }
     padding    : 1rem 0; 
 }
 
+
+/* ---------------------------------------------------------------------------- 
+ * Indirect Edges Statistics
+ * ----------------------------------------------------------------------------
+ */
+
+.c-blue .card-val { color: #8db1ff; }
+.research-grid {
+    display                 : grid;
+    grid-template-columns   : 1fr 1fr;
+    gap                     : 0.7rem;
+    margin-top              : 1rem;
+}
+.sig-table {
+    font-family             : 'Cascadia Mono', monospace;
+    font-size               : 0.65rem !important;
+}
+.sig-text {
+    max-width               : 400px;
+    overflow                : hidden;
+    text-overflow           : ellipsis;
+    display                 : block;
+    color                   : #c9d1d9;
+}
 
 </style>
 </head>
@@ -904,23 +929,62 @@ function renderHomeStats() {
     if (!stats) return '<div class="no-data">No stats JSON provided.</div>';
 
     const unreach = stats.totalFunctions - stats.reachableFunctions;
-    const rPct    = stats.totalFunctions ? 
-                    (stats.reachableFunctions / stats.totalFunctions * 100) : 0;
+    const rPct = stats.totalFunctions ? (stats.reachableFunctions / stats.totalFunctions * 100) : 0;
     const { labels: eLabels, data: eData } = edgeData(stats.grandTotal);
-    const pkgs    = Object.entries(stats.packages || {})
-                    .sort((a, b) => b[1].functionCount - a[1].functionCount);
-    const top8    = pkgs.slice(0, 8);
+    const pkgs = Object.entries(stats.packages || {}).sort((a, b) => b[1].functionCount - a[1].functionCount);
+    
+    // NEW: Indirect Analysis data
+    // We default to 0 for the new metrics so the UI doesn't break if they are missing
+    const ind = stats.indirect || { 
+        interfaceCallSites: 0, 
+        funcVarCallSites: 0, 
+        staticCallSites: 0,
+        funcsPassedToChannels: 0,
+        funcsPassedToGo: 0,
+        signatureMetrics: {} 
+    };
+    const sigEntries = Object.entries(ind.signatureMetrics || {}).sort((a,b) => b[1].potentialTargets - a[1].potentialTargets);
 
     statsPanel.innerHTML = `
-    <div class="stats-title">Overview 
-        <span class="badge">depth: ${stats.maxDepthSpecified}</span></div>
+    <div class="stats-title">Overview <span class="badge">depth: ${stats.maxDepthSpecified}</span></div>
     <div class="cards">
         ${card(fmt(stats.totalFunctions), 'Total Functions', 'All packages')}
         ${card(fmt(stats.reachableFunctions), 'Reachable', rPct.toFixed(1)+'%', 'c-green')}
-        ${card(fmt(unreach), 'Unreachable', (100-rPct).toFixed(1)+'%', 'c-orange')}
-        ${card(fmt(stats.grandTotal?.total), 'Total Edges', 'Calls', 'c-purple')}
-        ${card(fmt(pkgs.length), 'Packages', 'In scope')}
+        ${card(fmt(ind.staticCallSites), 'Static Calls', 'Direct dispatch', 'c-green')}
+        ${card(fmt(stats.grandTotal?.total), 'Total Edges', 'Call graph edges', 'c-purple')}
     </div>
+
+    <div class="stats-title">Thesis Research: Indirect Analysis</div>
+    <div class="cards">
+        ${card(fmt(ind.interfaceCallSites), 'Interface Calls', 'Virtual dispatch', 'c-blue')}
+        ${card(fmt(ind.funcVarCallSites), 'Func Var Calls', 'Dynamic dispatch', 'c-blue')}
+        ${card(fmt(ind.funcsPassedToChannels), 'Chan Transfers', 'Funcs in channels', 'c-orange')}
+        ${card(fmt(ind.funcsPassedToGo), 'Go Routines', 'Funcs in go stmts', 'c-orange')}
+    </div>
+
+    <div class="research-grid">
+        <div class="pkg-table-wrap">
+            <h3>Top Bloated Signatures (Resolution Complexity)</h3>
+            <table class="sig-table">
+                <thead>
+                    <tr><th>Function Signature</th><th class="r">Potential Targets</th></tr>
+                </thead>
+                <tbody>
+                    ${sigEntries.slice(0, 10).map(([sig, m]) => `
+                        <tr>
+                            <td><span class="sig-text" title="${sig}">${sig}</span></td>
+                            <td class="r"><span class="pill-bad">${m.potentialTargets}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div class="chart-box">
+             <h3>Dispatch Distribution</h3>
+             <canvas id="ch-indirect"></canvas>
+        </div>
+    </div>
+
     <div class="chart-row">
         <div class="chart-box" style="max-width:300px">
             <h3>Edges</h3><canvas id="ch-edges"></canvas>
@@ -934,6 +998,7 @@ function renderHomeStats() {
             <canvas id="ch-pkgs"></canvas>
         </div>
     </div>
+    
     <div class="pkg-table-wrap">
         <h3>All Packages</h3>
         <table>
@@ -941,21 +1006,47 @@ function renderHomeStats() {
             <tbody>${pkgs.map(([path, p]) => {
                 const u = (p.unusedFunctions||[]).length;
                 return `<tr>
-                    <td><span class="pkg-link" onclick="switchPackage('${path}',true,true)">
-                        ${path}</span></td>
+                    <td><span class="pkg-link" onclick="switchPackage('${path}',true,true)">${path}</span></td>
                     <td class="r">${fmt(p.functionCount)}</td>
-                    <td class="r"><span class="${u>0?'pill-bad':'pill-good'}">
-                        ${u>0?u:'✓'}</span></td>
+                    <td class="r"><span class="${u>0?'pill-bad':'pill-good'}">${u>0?u:'✓'}</span></td>
                 </tr>`;
             }).join('')}</tbody>
         </table>
     </div>`;
 
+    // 1. Edges Doughnut
     makeChart('ch-edges', {
         type: 'doughnut',
         data: { labels: eLabels, datasets: [{ data: eData, backgroundColor: PALETTE }] },
         options: { plugins: { legend: { position: 'right' } } }
     });
+    
+    // 2. Updated Call Distribution Chart (includes all types)
+    makeChart('ch-indirect', {
+        type: 'bar',
+        data: {
+            labels: ['Static', 'Interface', 'Func Var', 'Channels', 'Go Stmt'],
+            datasets: [{
+                label: 'Call Sites',
+                data: [
+                    ind.staticCallSites, 
+                    ind.interfaceCallSites, 
+                    ind.funcVarCallSites,
+                    ind.funcsPassedToChannels,
+                    ind.funcsPassedToGo
+                ],
+                backgroundColor: ['#2ea043', '#4c9dff', '#c97bfc', '#ffa657', '#ff7b72']
+            }]
+        },
+        options: { 
+            indexAxis: 'y', // Makes it easier to read labels
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true } }
+        }
+    });
+
+    // 3. Package Bar Chart
+    const top8 = pkgs.slice(0, 8);
     makeChart('ch-pkgs', {
         type: 'bar',
         data: { 
@@ -965,7 +1056,6 @@ function renderHomeStats() {
         options: { indexAxis: 'y', plugins: { legend: { display: false } } }
     });
 }
-
 /* ============================================================================
  * Package Stats Rendering (Corrected)
  * ============================================================================
