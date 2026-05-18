@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -156,7 +157,7 @@ func GatherCallGraphStats(
     countFunctions(g, report, depthMap, inDepth)
     countEdges(g, report, depthMap, inDepth)
 
-    mainNode := resolveMainNode(g, depthMap, projectRoot, inDepth)
+    mainNode := resolveMainNode(g, depthMap, projectRoot)
     if mainNode != nil {
         visited := make(map[int]struct{})
         // This now does both: marks reachable AND analyzes instructions
@@ -274,35 +275,61 @@ func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
  * ============================================================================
  */
 func resolveMainNode(
-    g               *cs_callgraph.Graph , depthMap  map[string]int, 
-    projectRoot     string              , inDepth   func(string) bool,
+	g *cs_callgraph.Graph, depthMap map[string]int,
+	projectRoot string,
 ) *cs_callgraph.Node {
-	var fallback *cs_callgraph.Node
+	var priority1 []*cs_callgraph.Node
+	var priority2 []*cs_callgraph.Node
+
 	for _, n := range g.Nodes {
 		if n.Func == nil || n.Func.Name() != "main" {
 			continue
 		}
+
 		pkg := cs_callgraph.EffectivePkg(n.Func)
 		if pkg == nil || pkg.Pkg == nil {
 			continue
 		}
+
 		pkgPath := pkg.Pkg.Path()
 		d, ok := depthMap[pkgPath]
-		
-        isInternalMain := ok && d == 0 && 
-            strings.HasPrefix(pkgPath, projectRoot)
 
-		if isInternalMain && pkg.Pkg.Name() == "main" {
-			return n
-		}
-		if isInternalMain && fallback == nil {
-			fallback = n
-		}
-		if fallback == nil && inDepth(pkgPath) {
-			fallback = n
+		if ok && d == 0 && strings.HasPrefix(pkgPath, projectRoot) {
+			if pkg.Pkg.Name() == "main" {
+				priority1 = append(priority1, n)
+			} else {
+				priority2 = append(priority2, n)
+			}
 		}
 	}
-	return fallback
+
+	if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
+		fmt.Println("[WARNING]: Multiple possible main functions found.")
+	}
+
+	if len(priority1) > 0 {
+		sort.Slice(priority1, func(i, j int) bool {
+			return priority1[i].Func.String() < priority1[j].Func.String()
+		})
+		fmt.Printf(
+			"[resolveMainNode] selected priority main: %s\n",
+			priority1[0].Func.String(),
+		)
+		return priority1[0]
+	} else if len(priority2) > 0 {
+		sort.Slice(priority2, func(i, j int) bool {
+			return priority2[i].Func.String() < priority2[j].Func.String()
+		})
+		fmt.Printf(
+			"[resolveMainNode] selected priority main: %s\n",
+			priority2[0].Func.String(),
+		)
+		return priority2[0]
+	}
+
+	fmt.Printf("[resolveMainNode] error: no main found\n")
+	os.Exit(-1)
+	return nil
 }
 
 /* ============================================================================

@@ -10,14 +10,14 @@ import (
  * EffectivePkg
  * ----------------------------------------------------------------------------
  * Returns the SSA package that logically owns fn. SSA does not always populate
- * fn.Pkg directly — generic instantiations, synthetic wrappers, and anonymous
+ * fn.Pkg directly - generic instantiations, synthetic wrappers, and anonymous
  * functions all leave it nil, with ownership residing on their origin, parent,
  * or enclosing function instead.
  *
  * Resolution order:
- *   1. fn.Pkg          — direct, fast path
- *   2. fn.Origin()     — generic instantiation → template function
- *   3. fn.Parent()     — closure / anonymous function → enclosing function
+ *   1. fn.Pkg          - direct, fast path
+ *   2. fn.Origin()     - generic instantiation → template function
+ *   3. fn.Parent()     - closure / anonymous function → enclosing function
  *
  * Results are memoized in EffectivePkgCache to avoid redundant traversals
  * across repeated lookups of the same function. Returns nil if no package
@@ -220,10 +220,10 @@ func BuildExtendedCallGraph2(
      * visit recursively walks the call graph from fn outward.
      *
      * Guards (in order):
-     *   1. nil / already-seen  — prevents cycles and nil deref
-     *   2. EffectivePkg        — skips unresolvable synthetics
-     *   3. pkgStatus.known     — skips out-of-scope packages
-     *   4. pkgStatus.withinDepth — stubs deep nodes (GenNode
+     *   1. nil / already-seen  - prevents cycles and nil deref
+     *   2. EffectivePkg        - skips unresolvable synthetics
+     *   3. pkgStatus.known     - skips out-of-scope packages
+     *   4. pkgStatus.withinDepth - stubs deep nodes (GenNode
      *                             only, body not scanned)
      *
      * For each in-scope function, all outgoing edges are

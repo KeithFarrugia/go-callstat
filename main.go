@@ -80,8 +80,8 @@ func isStdlib(pkgPath string) bool {
  * Reports whether pkgPath matches any pattern in the list.
  *
  * Two match modes:
- *   "runtime"   exact match — only "runtime" itself
- *   "runtime/"  prefix match — "runtime", "runtime/internal", etc.
+ *   "runtime"   exact match - only "runtime" itself
+ *   "runtime/"  prefix match - "runtime", "runtime/internal", etc.
  * ============================================================================
  */
 func matchesPattern(pkgPath string, patterns []string) bool {
@@ -195,7 +195,7 @@ func main() {
     prog.Build()
     fmt.Printf("[timer] SSA build     %v\n", time.Since(t))
 
-    // — Collect all known package paths for skip expansion
+    // - Collect all known package paths for skip expansion
     allPkgPaths := make([]string, 0, len(prog.AllPackages()))
     for _, pkg := range prog.AllPackages() {
         if pkg.Pkg != nil {
@@ -209,6 +209,7 @@ func main() {
     t = time.Now()
     skipCGMap := buildSkipMap(skipCGPatterns, *noStdlib, allPkgPaths)
     depthMap  := cs_callgraph.BuildPackageDepthMap(prog, projectRoot)
+	
     cg        := cs_callgraph.BuildExtendedCallGraph2(
         prog, *depthFlag, depthMap, skipCGMap,
     )

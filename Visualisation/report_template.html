@@ -370,8 +370,9 @@ details[open] > .pkg-group-summary::before {
  * ----------------------------------------------------------------------------
  */
 .chart-row { 
-    display     : flex; gap             : 0.7rem; 
-    flex-wrap   : wrap; margin-bottom   : 1rem;
+    display     : grid; gap             : 0.7rem;
+    margin-bottom   : 1rem;
+    grid-template-columns: 1fr 2fr;
 }
 .chart-box {
     background   : #161b22  ; border    : 1px solid #21262d;
@@ -384,7 +385,7 @@ details[open] > .pkg-group-summary::before {
     margin-bottom : 0.7rem    ; font-weight    : normal;
 }
 
-.chart-box canvas { max-height: 200px; }
+
 
 /* ---------------------------------------------------------------------------- 
  * Reachability Bar Styling
@@ -511,7 +512,8 @@ tr:hover td { background: #1c2128; }
     padding    : 1rem 0; 
 }
 
-
+.chart-box canvas { max-height: 200px; }
+#ch-indirect      { max-height: 340px; }
 /* ---------------------------------------------------------------------------- 
  * Indirect Edges Statistics
  * ----------------------------------------------------------------------------
@@ -519,10 +521,36 @@ tr:hover td { background: #1c2128; }
 
 .c-blue .card-val { color: #8db1ff; }
 .research-grid {
-    display                 : grid;
-    grid-template-columns   : 1fr 1fr;
-    gap                     : 0.7rem;
-    margin-top              : 1rem;
+    display               : grid;
+    grid-template-columns : 3fr 2fr;
+    gap                   : 0.7rem;
+    margin-bottom         : 0.7rem;
+    height                : 15rem;
+}
+
+.research-grid .pkg-table-wrap {
+    margin-bottom : 0;
+    display       : flex;
+    flex-direction: column;
+    overflow      : hidden;
+}
+
+.research-grid .sig-wrap {
+    flex        : 1;
+    overflow-y  : auto;
+    overflow-x  : hidden;
+}
+
+.research-grid .chart-box {
+    display        : flex;
+    flex-direction : column;
+    overflow       : hidden;
+}
+
+.research-grid .chart-box canvas {
+    flex       : 1;
+    max-height : none;
+    min-height : 0;
 }
 .sig-table {
     font-family             : 'Cascadia Mono', monospace;
@@ -933,17 +961,15 @@ function renderHomeStats() {
     const { labels: eLabels, data: eData } = edgeData(stats.grandTotal);
     const pkgs = Object.entries(stats.packages || {}).sort((a, b) => b[1].functionCount - a[1].functionCount);
     
-    // NEW: Indirect Analysis data
-    // We default to 0 for the new metrics so the UI doesn't break if they are missing
-    const ind = stats.indirect || { 
-        interfaceCallSites: 0, 
-        funcVarCallSites: 0, 
-        staticCallSites: 0,
-        funcsPassedToChannels: 0,
-        funcsPassedToGo: 0,
-        signatureMetrics: {} 
-    };
-    const sigEntries = Object.entries(ind.signatureMetrics || {}).sort((a,b) => b[1].potentialTargets - a[1].potentialTargets);
+    const ind = stats.indirect || {};
+    const indDef = (key) => ind[key] ?? 0;
+    const sigEntries = Object.entries(ind.signatureMetrics || {})
+    .sort((a, b) => {
+        const crossB = b[1].potentialTargets * b[1].actualCallSites;
+        const crossA = a[1].potentialTargets * a[1].actualCallSites;
+        if (crossB !== crossA) return crossB - crossA;
+        return b[1].potentialTargets - a[1].potentialTargets;
+    });
 
     statsPanel.innerHTML = `
     <div class="stats-title">Overview <span class="badge">depth: ${stats.maxDepthSpecified}</span></div>
@@ -956,37 +982,57 @@ function renderHomeStats() {
 
     <div class="stats-title">Thesis Research: Indirect Analysis</div>
     <div class="cards">
-        ${card(fmt(ind.interfaceCallSites), 'Interface Calls', 'Virtual dispatch', 'c-blue')}
-        ${card(fmt(ind.funcVarCallSites), 'Func Var Calls', 'Dynamic dispatch', 'c-blue')}
-        ${card(fmt(ind.funcsPassedToChannels), 'Chan Transfers', 'Funcs in channels', 'c-orange')}
-        ${card(fmt(ind.funcsPassedToGo), 'Go Routines', 'Funcs in go stmts', 'c-orange')}
+        ${card(fmt(ind.interfaceCallSites),   'Interface Calls',  'Virtual dispatch',   'c-blue')}
+        ${card(fmt(ind.funcVarCallSites),     'Func Var Calls',   'Dynamic dispatch',   'c-blue')}
+        ${card(fmt(ind.funcLiteralStores),    'Literal Stores',   'f := func(){...}',   'c-orange')}
+        ${card(fmt(ind.funcNamedStores),      'Named Stores',     'f := namedFunc',     'c-orange')}
+        ${card(fmt(ind.funcPropagations),     'Propagations',     'b = a (func copy)',  'c-orange')}
+        ${card(fmt(ind.funcInStructOrMap),    'Struct/Map',       'Field or map entry', 'c-orange')}
+        ${card(fmt(ind.funcChans),            'Func Channels',    'make(chan F)',        'c-purple')}
+        ${card(fmt(ind.goroutinesFuncChan),   'Go Func Chan',     'Goroutine+func chan', 'c-purple')}
+        ${card(fmt(ind.funcsSentToFuncChan),  'Chan Sends',       'ch <- funcVal',      'c-purple')}
+        ${card(fmt(ind.funcsReceivedForCall), 'Chan Recv Calls',  '<-ch then called',   'c-purple')}
     </div>
 
     <div class="research-grid">
         <div class="pkg-table-wrap">
-            <h3>Top Bloated Signatures (Resolution Complexity)</h3>
-            <table class="sig-table">
-                <thead>
-                    <tr><th>Function Signature</th><th class="r">Potential Targets</th></tr>
-                </thead>
-                <tbody>
-                    ${sigEntries.slice(0, 10).map(([sig, m]) => `
+            <h3>Signature Cross-Product (sorted by potential x actual)</h3>
+            <div class="sig-wrap">
+                <table class="sig-table">
+                    <thead>
                         <tr>
-                            <td><span class="sig-text" title="${sig}">${sig}</span></td>
-                            <td class="r"><span class="pill-bad">${m.potentialTargets}</span></td>
+                            <th>Signature</th>
+                            <th class="r">Potential</th>
+                            <th class="r">Call Sites</th>
+                            <th class="r">Cross-Product</th>
                         </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        ${sigEntries.slice(0, 20).map(([sig, m]) => {
+                            const cross = m.potentialTargets * m.actualCallSites;
+                            return `<tr>
+                                <td><span class="sig-text" title="${sig}">${sig}</span></td>
+                                <td class="r">${fmt(m.potentialTargets)}</td>
+                                <td class="r">${fmt(m.actualCallSites)}</td>
+                                <td class="r">
+                                    <span class="${cross > 0 ? 'pill-bad' : 'pill-good'}">
+                                        ${fmt(cross)}
+                                    </span>
+                                </td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
         <div class="chart-box">
-             <h3>Dispatch Distribution</h3>
-             <canvas id="ch-indirect"></canvas>
+            <h3>Dispatch Distribution</h3>
+            <canvas id="ch-indirect"></canvas>
         </div>
     </div>
 
     <div class="chart-row">
-        <div class="chart-box" style="max-width:300px">
+        <div class="chart-box">
             <h3>Edges</h3><canvas id="ch-edges"></canvas>
         </div>
         <div class="chart-box">
@@ -1025,23 +1071,55 @@ function renderHomeStats() {
     makeChart('ch-indirect', {
         type: 'bar',
         data: {
-            labels: ['Static', 'Interface', 'Func Var', 'Channels', 'Go Stmt'],
+            labels: [
+                'Static Calls',
+                'Interface Calls',
+                'Func Var Calls',
+                'Literal Stores',
+                'Named Stores',
+                'Propagations',
+                'Struct/Map',
+                'Func Channels',
+                'Go+Func Chan',
+                'Chan Sends',
+                'Chan Recv→Call',
+            ],
             datasets: [{
-                label: 'Call Sites',
+                label: 'Count',
                 data: [
-                    ind.staticCallSites, 
-                    ind.interfaceCallSites, 
+                    ind.staticCallSites,
+                    ind.interfaceCallSites,
                     ind.funcVarCallSites,
-                    ind.funcsPassedToChannels,
-                    ind.funcsPassedToGo
+                    ind.funcLiteralStores,
+                    ind.funcNamedStores,
+                    ind.funcPropagations,
+                    ind.funcInStructOrMap,
+                    ind.funcChans,
+                    ind.goroutinesFuncChan,
+                    ind.funcsSentToFuncChan,
+                    ind.funcsReceivedForCall,
                 ],
-                backgroundColor: ['#2ea043', '#4c9dff', '#c97bfc', '#ffa657', '#ff7b72']
+                backgroundColor: [
+                    '#2ea043',
+                    '#4c9dff',
+                    '#c97bfc',
+                    '#f0a24b',
+                    '#f0a24b',
+                    '#f0a24b',
+                    '#f0a24b',
+                    '#ff7b72',
+                    '#ff7b72',
+                    '#ff7b72',
+                    '#ff7b72',
+                ],
             }]
         },
-        options: { 
-            indexAxis: 'y', // Makes it easier to read labels
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true } }
+        options: {
+            autoSkip            : false,
+            indexAxis           : 'y',
+            maintainAspectRatio : false,
+            plugins             : { legend: { display: false } },
+            scales              : { x: { beginAtZero: true } },
         }
     });
 
@@ -1091,7 +1169,7 @@ function renderPkgStats(pkg) {
     </div>
 
     <div class="chart-row">
-        <div class="chart-box" style="max-width:300px">
+        <div class="chart-box" >
             <h3>Edge Kinds</h3>
             ${eData.length ? '<canvas id="ch-pkg-edges"></canvas>' : '<div class="no-data">None</div>'}
         </div>
