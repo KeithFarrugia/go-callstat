@@ -42,24 +42,24 @@ func (s *stringSlice) Set(v string) error { *s = append(*s, v); return nil }
  * ============================================================================
  */
 func GetModuleName(targetDir string) string {
-	absDir, err := filepath.Abs(targetDir)
-	if err != nil {
-		return ""
-	}
-	for curr := absDir; ; curr = filepath.Dir(curr) {
-		data, err := os.ReadFile(filepath.Join(curr, "go.mod"))
-		if err == nil {
-			scanner := bufio.NewScanner(strings.NewReader(string(data)))
-			if scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				return strings.TrimPrefix(line, "module ")
-			}
-		}
-		if parent := filepath.Dir(curr); parent == curr {
-			break
-		}
-	}
-	return ""
+    absDir, err := filepath.Abs(targetDir)
+    if err != nil {
+        return ""
+    }
+    for curr := absDir; ; curr = filepath.Dir(curr) {
+        data, err := os.ReadFile(filepath.Join(curr, "go.mod"))
+        if err == nil {
+            scanner := bufio.NewScanner(strings.NewReader(string(data)))
+            if scanner.Scan() {
+                line := strings.TrimSpace(scanner.Text())
+                return strings.TrimPrefix(line, "module ")
+            }
+        }
+        if parent := filepath.Dir(curr); parent == curr {
+            break
+        }
+    }
+    return ""
 }
 
 /* ============================================================================
@@ -70,8 +70,8 @@ func GetModuleName(targetDir string) string {
  * ============================================================================
  */
 func isStdlib(pkgPath string) bool {
-	first := strings.SplitN(pkgPath, "/", 2)[0]
-	return !strings.Contains(first, ".")
+    first := strings.SplitN(pkgPath, "/", 2)[0]
+    return !strings.Contains(first, ".")
 }
 
 /* ============================================================================
@@ -85,17 +85,17 @@ func isStdlib(pkgPath string) bool {
  * ============================================================================
  */
 func matchesPattern(pkgPath string, patterns []string) bool {
-	for _, p := range patterns {
-		if strings.HasSuffix(p, "/") {
-			base := strings.TrimSuffix(p, "/")
-			if pkgPath == base || strings.HasPrefix(pkgPath, base+"/") {
-				return true
-			}
-		} else if pkgPath == p {
-			return true
-		}
-	}
-	return false
+    for _, p := range patterns {
+        if strings.HasSuffix(p, "/") {
+            base := strings.TrimSuffix(p, "/")
+            if pkgPath == base || strings.HasPrefix(pkgPath, base+"/") {
+                return true
+            }
+        } else if pkgPath == p {
+            return true
+        }
+    }
+    return false
 }
 
 /* ============================================================================
@@ -106,19 +106,19 @@ func matchesPattern(pkgPath string, patterns []string) bool {
  * ============================================================================
  */
 func buildSkipMap(
-	patterns      []string,
-	excludeStdlib bool,
-	allPkgPaths   []string,
+    patterns      []string,
+    excludeStdlib bool,
+    allPkgPaths   []string,
 ) map[string]struct{} {
-	result := make(map[string]struct{})
-	for _, path := range allPkgPaths {
-		patternMatch := matchesPattern(path, patterns)
-		stdlibMatch  := excludeStdlib && isStdlib(path)
-		if patternMatch || stdlibMatch {
-			result[path] = struct{}{}
-		}
-	}
-	return result
+    result := make(map[string]struct{})
+    for _, path := range allPkgPaths {
+        patternMatch := matchesPattern(path, patterns)
+        stdlibMatch  := excludeStdlib && isStdlib(path)
+        if patternMatch || stdlibMatch {
+            result[path] = struct{}{}
+        }
+    }
+    return result
 }
 
 /* ============================================================================
@@ -126,50 +126,57 @@ func buildSkipMap(
  * ============================================================================
  */
 func main() {
-	/* -------------------------------------------------------
-	 * Flags
-	 * ------------------------------------------------------- */
-	var skipCGPatterns  stringSlice
-	var skipVisPatterns stringSlice
+    /* -------------------------------------------------------
+     * Flags
+     * ------------------------------------------------------- */
+    var skipCGPatterns  stringSlice
+    var skipVisPatterns stringSlice
 
-	depthFlag := flag.Int("depth", 2,
-		"Depth of external package traversal (-1 = unlimited)")
-	targetDir := flag.String("dir", "../dep-usage-test/",
-		"Directory of the project to analyse")
-	reportOut := flag.String("report", "./report.html",
-		"Path for the HTML report output")
-	dotDir := flag.String("dot-dir", "./output/dot",
-		"Directory for intermediate DOT files")
-	svgDir := flag.String("svg-dir", "./output/svg",
-		"Directory for intermediate SVG files")
-	statsOut := flag.String("stats", "./output/callgraph_report.json",
-		"Path for the stats JSON output")
-	noStdlib := flag.Bool("no-stdlib", false,
-		"Exclude the standard library from callgraph traversal")
+    depthFlag := flag.Int("depth", 2,
+        "Depth of external package traversal (-1 = unlimited)")
+    targetDir := flag.String("dir", "../dep-usage-test/",
+        "Directory of the project to analyse")
+    reportOut := flag.String("report", "./report.html",
+        "Path for the HTML report output")
+    dotDir := flag.String("dot-dir", "./output/dot",
+        "Directory for intermediate DOT files")
+    svgDir := flag.String("svg-dir", "./output/svg",
+        "Directory for intermediate SVG files")
+    statsOut := flag.String("stats", "./output/callgraph_report.json",
+        "Path for the stats JSON output")
+    noStdlib := flag.Bool("no-stdlib", false,
+        "Exclude the standard library from callgraph traversal")
     
     noStats := flag.Bool("no-stats", false, 
         "Disable statistics calculation and JSON output")
     noVis := flag.Bool("no-vis", false, 
         "Disable DOT/SVG generation and visualization parts")
+    
+    mainEntry := flag.String("main", "",
+        "Fully qualified main function to use as entry point "+
+            "(e.g. 'github.com/you/repo/cmd/serve.main'); "+
+            "defaults to automatic detection")
+            
+    flag.Var(&skipCGPatterns, "skip-cg",
+        "Exclude from callgraph (repeatable; trailing / = prefix match)")
+    flag.Var(&skipVisPatterns, "skip-vis",
+        "Exclude from visualisation (repeatable; trailing / = prefix match)")
 
-	flag.Var(&skipCGPatterns, "skip-cg",
-		"Exclude from callgraph (repeatable; trailing / = prefix match)")
-	flag.Var(&skipVisPatterns, "skip-vis",
-		"Exclude from visualisation (repeatable; trailing / = prefix match)")
-	flag.Parse()
-	/* -------------------------------------------------------
-	 * Project root detection
-	 * ------------------------------------------------------- */
-	projectRoot := GetModuleName(*targetDir)
-	if projectRoot == "" {
-		log.Printf("[warn] could not find go.mod in %s or parents", *targetDir)
-	} else {
-		fmt.Printf("[info] project root: %s\n", projectRoot)
-	}
 
-	/* -------------------------------------------------------
-	 * Benchmark loop
-	 * ------------------------------------------------------- */
+    flag.Parse()
+    /* -------------------------------------------------------
+     * Project root detection
+     * ------------------------------------------------------- */
+    projectRoot := GetModuleName(*targetDir)
+    if projectRoot == "" {
+        log.Printf("[warn] could not find go.mod in %s or parents", *targetDir)
+    } else {
+        fmt.Printf("[info] project root: %s\n", projectRoot)
+    }
+
+    /* -------------------------------------------------------
+     * Benchmark loop
+     * ------------------------------------------------------- */
 
     cs_callgraph.EffectivePkgCache = sync.Map{}
     totalTimeStart := time.Now()
@@ -207,9 +214,10 @@ func main() {
     * Callgraph
     * ------------------------------------------------------- */
     t = time.Now()
+    targetMainPkg := cs_callgraph.ResolveMainPackage(prog, projectRoot, *mainEntry)
     skipCGMap := buildSkipMap(skipCGPatterns, *noStdlib, allPkgPaths)
-    depthMap  := cs_callgraph.BuildPackageDepthMap(prog, projectRoot)
-	
+    depthMap  := cs_callgraph.BuildPackageDepthMapFromMain(prog, projectRoot, targetMainPkg)
+    
     cg        := cs_callgraph.BuildExtendedCallGraph2(
         prog, *depthFlag, depthMap, skipCGMap,
     )
@@ -221,7 +229,7 @@ func main() {
     if !*noStats {
         t = time.Now()
         statsObj := stats.GatherCallGraphStats(
-            cg, depthMap, *depthFlag, projectRoot,
+            cg, depthMap, *depthFlag, projectRoot, *mainEntry,
         )
         statsObj.WriteJSONToFile(*statsOut)
         fmt.Printf("[timer] statistics    %v\n", time.Since(t))
@@ -245,5 +253,5 @@ func main() {
 
     totalTimeFinished := time.Since(totalTimeStart).Milliseconds()
 
-	fmt.Printf("\n[average] %dms", totalTimeFinished)
+    fmt.Printf("\n[average] %dms", totalTimeFinished)
 }

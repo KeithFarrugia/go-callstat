@@ -121,17 +121,13 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
         call := i.Common()
         var results []nodeKind
 
-        // 1. Static Callee (Direct calls)
         if callee := call.StaticCallee(); callee != nil {
             target := resolveServiceableFunc(callee)
             results = append(results, nodeKind{cg.GenNode(target), CallEdge})
         } else {
-            // 2. Method selection / Bound methods (This is Bob!)
-            // We check the Value directly if it's a function
             if fnVal, ok := isFuncValue(call.Value); ok {
                 results = append(results, nodeKind{cg.GenNode(fnVal), CallEdge})
             } else if call.Method != nil {
-                // 3. Fallback: Search the program for the method implementation
                 if fn := i.Parent().Prog.FuncValue(call.Method); fn != nil {
                     results = append(results, nodeKind{cg.GenNode(resolveServiceableFunc(fn)), CallEdge})
                 }

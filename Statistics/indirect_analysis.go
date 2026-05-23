@@ -98,12 +98,11 @@ func GatherResearchStats(
 	depthMap    map[string]int,
 	maxDepth    int,
 	projectRoot string,
+	mainNode 	*cs_callgraph.Node,
 ) *IndirectAnalysisReport {
-	fmt.Printf("Indirect ANALYSIS")
 	report  := newIndirectReport()
 	inDepth := makeDepthGate(depthMap, maxDepth)
 
-	mainNode := resolveMainNode(g, depthMap, projectRoot)
 	if mainNode != nil {
 		visited := make(map[int]struct{})
 		traverseAndAnalyze(mainNode, visited, report, inDepth)
@@ -144,18 +143,8 @@ func traverseAndAnalyze(
 		}
 	}
 }
-
 /* ============================================================================
  * analyzeInstructions
- * ----------------------------------------------------------------------------
- * Walks every SSA instruction in fn and classifies it into one of the
- * report buckets. See inline comments for the SSA patterns each case covers.
- * ============================================================================
- */
-
-
-/* ============================================================================
- * debugAnalyzeInstructions
  * ----------------------------------------------------------------------------
  * Drop-in replacement for analyzeInstructions that prints a table of every
  * instruction it processes and which bucket(s) it hit.

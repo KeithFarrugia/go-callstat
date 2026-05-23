@@ -150,6 +150,7 @@ func GatherCallGraphStats(
     depthMap    map[string]int,
     maxDepth    int,
     projectRoot string,
+    main   string,
 ) *CallGraphReport {
     report := newCallGraphReport(maxDepth)
     inDepth := makeDepthGate(depthMap, maxDepth)
@@ -157,15 +158,16 @@ func GatherCallGraphStats(
     countFunctions(g, report, depthMap, inDepth)
     countEdges(g, report, depthMap, inDepth)
 
-    mainNode := resolveMainNode(g, depthMap, projectRoot)
+    mainNode := resolveMainNode(g, depthMap, projectRoot, main)
     if mainNode != nil {
         visited := make(map[int]struct{})
-        // This now does both: marks reachable AND analyzes instructions
         traverseReachable(mainNode, visited, report, inDepth)
     }
 
     collectUnused(g, report, depthMap, inDepth)
-	report.Indirect = GatherResearchStats(g, depthMap, maxDepth, projectRoot);
+	report.Indirect = GatherResearchStats(
+		g, depthMap, maxDepth, projectRoot, mainNode,
+	);
     return report
 }
 /* ============================================================================
@@ -263,73 +265,154 @@ func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
 	return inDepth(calleePkg.Pkg.Path())
 }
 
+
 /* ============================================================================
  * resolveMainNode
  * ----------------------------------------------------------------------------
- * Finds the best candidate for the main entry point.
- *
- * Priority:
- *   1. Internal depth-0 package literally named "main", function "main"
- *   2. Any internal depth-0 function named "main"
- *   3. Any in-depth function named "main"
+ * Calls either main resolver depending if a main path is specified or not
  * ============================================================================
  */
 func resolveMainNode(
-	g *cs_callgraph.Graph, depthMap map[string]int,
-	projectRoot string,
+    g           *cs_callgraph.Graph, 
+    depthMap    map[string]int,
+    projectRoot string, 
+    main        string,
 ) *cs_callgraph.Node {
-	var priority1 []*cs_callgraph.Node
-	var priority2 []*cs_callgraph.Node
+    if main != "" {
+        return resolveExplicitMain(g, depthMap, main)
+    }
+    return findPossibleMain(g, depthMap, projectRoot)
+}
 
-	for _, n := range g.Nodes {
-		if n.Func == nil || n.Func.Name() != "main" {
-			continue
-		}
+/* ============================================================================
+ * resolveExplicitMain
+ * ----------------------------------------------------------------------------
+ * Resolves a main entry point by performing an exact match against a fully
+ * qualified function string (e.g., "github.com/restic/restic/cmd/restic.main").
+ *
+ * Validates that the target function is present in the provided callgraph
+ * and belongs to a package tracked within the project dependency map.
+ * ============================================================================
+ */
+func resolveExplicitMain(
+    g        *cs_callgraph.Graph, 
+    depthMap map[string]int,
+    main     string,
+) *cs_callgraph.Node {
+    for _, n := range g.Nodes {
+        if n.Func == nil {
+            continue
+        }
 
-		pkg := cs_callgraph.EffectivePkg(n.Func)
-		if pkg == nil || pkg.Pkg == nil {
-			continue
-		}
+        funcStr := n.Func.String()
 
-		pkgPath := pkg.Pkg.Path()
-		d, ok := depthMap[pkgPath]
+        if funcStr == main {
+            pkg := cs_callgraph.EffectivePkg(n.Func)
+            if pkg == nil || pkg.Pkg == nil {
+                continue
+            }
 
-		if ok && d == 0 && strings.HasPrefix(pkgPath, projectRoot) {
-			if pkg.Pkg.Name() == "main" {
-				priority1 = append(priority1, n)
-			} else {
-				priority2 = append(priority2, n)
-			}
-		}
-	}
+            pkgPath := pkg.Pkg.Path()
+            if _, exists := depthMap[pkgPath]; !exists {
+                fmt.Printf(
+                    "[resolveExplicitMain] Match found but " + 
+                    "package %s is outside depthMap\n", pkgPath,
+                )
+                continue
+            }
 
-	if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
-		fmt.Println("[WARNING]: Multiple possible main functions found.")
-	}
+            fmt.Printf(
+                "[resolveExplicitMain] Exact match found: %s\n",
+                funcStr,
+            )
+            return n
+        }
+    }
 
-	if len(priority1) > 0 {
-		sort.Slice(priority1, func(i, j int) bool {
-			return priority1[i].Func.String() < priority1[j].Func.String()
-		})
-		fmt.Printf(
-			"[resolveMainNode] selected priority main: %s\n",
-			priority1[0].Func.String(),
-		)
-		return priority1[0]
-	} else if len(priority2) > 0 {
-		sort.Slice(priority2, func(i, j int) bool {
-			return priority2[i].Func.String() < priority2[j].Func.String()
-		})
-		fmt.Printf(
-			"[resolveMainNode] selected priority main: %s\n",
-			priority2[0].Func.String(),
-		)
-		return priority2[0]
-	}
+    fmt.Printf(
+        "[resolveExplicitMain] error: specified" + 
+        " main entry point %q not found\n", main,
+    )
+    os.Exit(-1)
+    return nil
+}
 
-	fmt.Printf("[resolveMainNode] error: no main found\n")
-	os.Exit(-1)
-	return nil
+/* ============================================================================
+ * findPossibleMain
+ * ----------------------------------------------------------------------------
+ * Scans the callgraph to discover and rank potential main entry points.
+ *
+ * Enforces a strict selection hierarchy across project root packages:
+ *   Priority 1: Function named "main" inside an internal depth-0 "main" package.
+ *   Priority 2: Function named "main" inside any other internal depth-0 package.
+ *
+ * Discovered candidates are listed comprehensively. Both priority pools are
+ * sorted alphabetically to guarantee consistent, deterministic root resolution
+ * when multiple matching entry points are encountered.
+ * ============================================================================
+ */
+func findPossibleMain(
+    g *cs_callgraph.Graph, depthMap map[string]int,
+    projectRoot string,
+) *cs_callgraph.Node {
+    var priority1 []*cs_callgraph.Node
+    var priority2 []*cs_callgraph.Node
+
+    for _, n := range g.Nodes {
+        if n.Func == nil || n.Func.Name() != "main" {
+            continue
+        }
+
+        pkg := cs_callgraph.EffectivePkg(n.Func)
+        if pkg == nil || pkg.Pkg == nil {
+            continue
+        }
+
+        pkgPath := pkg.Pkg.Path()
+        d, ok := depthMap[pkgPath]
+
+        if ok && d == 0 && strings.HasPrefix(pkgPath, projectRoot) {
+            if pkg.Pkg.Name() == "main" {
+                priority1 = append(priority1, n)
+            } else {
+                priority2 = append(priority2, n)
+            }
+        }
+    }
+
+    sort.Slice(priority1, func(i, j int) bool {
+        return priority1[i].Func.String() < priority1[j].Func.String()
+    })
+    sort.Slice(priority2, func(i, j int) bool {
+        return priority2[i].Func.String() < priority2[j].Func.String()
+    })
+
+    totalMains := len(priority1) + len(priority2)
+    if totalMains > 0 {
+        fmt.Printf("[resolveMainNode] Found %d total potential main function(s):\n", totalMains)
+        for _, n := range priority1 {
+            fmt.Printf("  -> [Priority 1] (pkg: main): %s\n", n.Func.String())
+        }
+        for _, n := range priority2 {
+            fmt.Printf("  -> [Priority 2] (pkg: other): %s\n", n.Func.String())
+        }
+    }
+
+    if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
+        fmt.Println("[WARNING]: Multiple possible main functions found.")
+    }
+
+    if len(priority1) > 0 {
+        fmt.Printf("[resolveMainNode] selected priority main: %s\n", priority1[0].Func.String())
+        return priority1[0]
+    } else if len(priority2) > 0 {
+        fmt.Printf("[resolveMainNode] selected priority main: %s\n", priority2[0].Func.String())
+        return priority2[0]
+    }
+
+    fmt.Printf("[resolveMainNode] error: no main found\n")
+    os.Exit(-1)
+    return nil
 }
 
 /* ============================================================================
@@ -387,7 +470,6 @@ func traverseReachable(
         return
     }
 
-    // 1. Existing Logic: Mark Reachability
     r.ReachableFuncNames[n.Func.String()] = struct{}{}
     r.ReachableFunctions++
 
@@ -396,34 +478,4 @@ func traverseReachable(
             traverseReachable(e.Callee, visited, r, inDepth)
         }
     }
-}
-
-/* ============================================================================
- * PrintStats
- * ----------------------------------------------------------------------------
- * Prints the statistics to stdout.
- * ============================================================================
- */
-func (r *CallGraphReport) PrintStats() {
-	fmt.Printf("=== CallGraph Statistics (Max Depth: %d) ===\n", r.MaxDepthSpecified)
-	fmt.Printf("Total functions: %d\n", r.TotalFunctions)
-	fmt.Printf("Reachable functions: %d\n", r.ReachableFunctions)
-
-	fmt.Println("\nPer-Package Details:")
-	for path, p := range r.Packages {
-		fmt.Printf("  %s (Depth: %d)\n", path, p.Depth)
-		fmt.Printf("    Functions: %d\n", p.FunctionCount)
-		fmt.Printf("    Edges: %d\n", p.Edges.Total)
-		for kind, count := range p.Edges.Counts {
-			fmt.Printf("      - %s: %d\n", kind, count)
-		}
-		if len(p.UnusedFunctions) > 0 {
-			fmt.Printf("    Unused: %v\n", p.UnusedFunctions)
-		}
-	}
-
-	fmt.Printf("\nGrand total edges: %d\n", r.GrandTotalEdges.Total)
-	for kind, n := range r.GrandTotalEdges.Counts {
-		fmt.Printf("  %s: %d\n", kind, n)
-	}
 }
