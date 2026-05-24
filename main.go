@@ -214,9 +214,9 @@ func main() {
     * Callgraph
     * ------------------------------------------------------- */
     t = time.Now()
-    targetMainPkg := cs_callgraph.ResolveMainPackage(prog, projectRoot, *mainEntry)
+    targetMainPkg := cs_callgraph.ResolveMain(prog, projectRoot, *mainEntry)
     skipCGMap := buildSkipMap(skipCGPatterns, *noStdlib, allPkgPaths)
-    depthMap  := cs_callgraph.BuildPackageDepthMapFromMain(prog, projectRoot, targetMainPkg)
+    depthMap  := cs_callgraph.BuildPackageDepthMapFromMain(prog, projectRoot, targetMainPkg.Packg)
     
     cg        := cs_callgraph.BuildExtendedCallGraph2(
         prog, *depthFlag, depthMap, skipCGMap,
@@ -229,7 +229,7 @@ func main() {
     if !*noStats {
         t = time.Now()
         statsObj := stats.GatherCallGraphStats(
-            cg, depthMap, *depthFlag, projectRoot, *mainEntry,
+            cg, depthMap, *depthFlag, projectRoot, targetMainPkg.Funct,
         )
         statsObj.WriteJSONToFile(*statsOut)
         fmt.Printf("[timer] statistics    %v\n", time.Since(t))

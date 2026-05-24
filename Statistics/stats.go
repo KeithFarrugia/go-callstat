@@ -3,11 +3,10 @@ package stats
 import (
 	cs_callgraph "callstat/CS-Callgraph"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+
+	"golang.org/x/tools/go/ssa"
 )
 
 /* ============================================================================
@@ -150,7 +149,7 @@ func GatherCallGraphStats(
     depthMap    map[string]int,
     maxDepth    int,
     projectRoot string,
-    main   string,
+    main        *ssa.Function,
 ) *CallGraphReport {
     report := newCallGraphReport(maxDepth)
     inDepth := makeDepthGate(depthMap, maxDepth)
@@ -158,7 +157,8 @@ func GatherCallGraphStats(
     countFunctions(g, report, depthMap, inDepth)
     countEdges(g, report, depthMap, inDepth)
 
-    mainNode := resolveMainNode(g, depthMap, projectRoot, main)
+    mainNode := g.Nodes[main]
+
     if mainNode != nil {
         visited := make(map[int]struct{})
         traverseReachable(mainNode, visited, report, inDepth)
@@ -263,156 +263,6 @@ func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
 		return false
 	}
 	return inDepth(calleePkg.Pkg.Path())
-}
-
-
-/* ============================================================================
- * resolveMainNode
- * ----------------------------------------------------------------------------
- * Calls either main resolver depending if a main path is specified or not
- * ============================================================================
- */
-func resolveMainNode(
-    g           *cs_callgraph.Graph, 
-    depthMap    map[string]int,
-    projectRoot string, 
-    main        string,
-) *cs_callgraph.Node {
-    if main != "" {
-        return resolveExplicitMain(g, depthMap, main)
-    }
-    return findPossibleMain(g, depthMap, projectRoot)
-}
-
-/* ============================================================================
- * resolveExplicitMain
- * ----------------------------------------------------------------------------
- * Resolves a main entry point by performing an exact match against a fully
- * qualified function string (e.g., "github.com/restic/restic/cmd/restic.main").
- *
- * Validates that the target function is present in the provided callgraph
- * and belongs to a package tracked within the project dependency map.
- * ============================================================================
- */
-func resolveExplicitMain(
-    g        *cs_callgraph.Graph, 
-    depthMap map[string]int,
-    main     string,
-) *cs_callgraph.Node {
-    for _, n := range g.Nodes {
-        if n.Func == nil {
-            continue
-        }
-
-        funcStr := n.Func.String()
-
-        if funcStr == main {
-            pkg := cs_callgraph.EffectivePkg(n.Func)
-            if pkg == nil || pkg.Pkg == nil {
-                continue
-            }
-
-            pkgPath := pkg.Pkg.Path()
-            if _, exists := depthMap[pkgPath]; !exists {
-                fmt.Printf(
-                    "[resolveExplicitMain] Match found but " + 
-                    "package %s is outside depthMap\n", pkgPath,
-                )
-                continue
-            }
-
-            fmt.Printf(
-                "[resolveExplicitMain] Exact match found: %s\n",
-                funcStr,
-            )
-            return n
-        }
-    }
-
-    fmt.Printf(
-        "[resolveExplicitMain] error: specified" + 
-        " main entry point %q not found\n", main,
-    )
-    os.Exit(-1)
-    return nil
-}
-
-/* ============================================================================
- * findPossibleMain
- * ----------------------------------------------------------------------------
- * Scans the callgraph to discover and rank potential main entry points.
- *
- * Enforces a strict selection hierarchy across project root packages:
- *   Priority 1: Function named "main" inside an internal depth-0 "main" package.
- *   Priority 2: Function named "main" inside any other internal depth-0 package.
- *
- * Discovered candidates are listed comprehensively. Both priority pools are
- * sorted alphabetically to guarantee consistent, deterministic root resolution
- * when multiple matching entry points are encountered.
- * ============================================================================
- */
-func findPossibleMain(
-    g *cs_callgraph.Graph, depthMap map[string]int,
-    projectRoot string,
-) *cs_callgraph.Node {
-    var priority1 []*cs_callgraph.Node
-    var priority2 []*cs_callgraph.Node
-
-    for _, n := range g.Nodes {
-        if n.Func == nil || n.Func.Name() != "main" {
-            continue
-        }
-
-        pkg := cs_callgraph.EffectivePkg(n.Func)
-        if pkg == nil || pkg.Pkg == nil {
-            continue
-        }
-
-        pkgPath := pkg.Pkg.Path()
-        d, ok := depthMap[pkgPath]
-
-        if ok && d == 0 && strings.HasPrefix(pkgPath, projectRoot) {
-            if pkg.Pkg.Name() == "main" {
-                priority1 = append(priority1, n)
-            } else {
-                priority2 = append(priority2, n)
-            }
-        }
-    }
-
-    sort.Slice(priority1, func(i, j int) bool {
-        return priority1[i].Func.String() < priority1[j].Func.String()
-    })
-    sort.Slice(priority2, func(i, j int) bool {
-        return priority2[i].Func.String() < priority2[j].Func.String()
-    })
-
-    totalMains := len(priority1) + len(priority2)
-    if totalMains > 0 {
-        fmt.Printf("[resolveMainNode] Found %d total potential main function(s):\n", totalMains)
-        for _, n := range priority1 {
-            fmt.Printf("  -> [Priority 1] (pkg: main): %s\n", n.Func.String())
-        }
-        for _, n := range priority2 {
-            fmt.Printf("  -> [Priority 2] (pkg: other): %s\n", n.Func.String())
-        }
-    }
-
-    if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
-        fmt.Println("[WARNING]: Multiple possible main functions found.")
-    }
-
-    if len(priority1) > 0 {
-        fmt.Printf("[resolveMainNode] selected priority main: %s\n", priority1[0].Func.String())
-        return priority1[0]
-    } else if len(priority2) > 0 {
-        fmt.Printf("[resolveMainNode] selected priority main: %s\n", priority2[0].Func.String())
-        return priority2[0]
-    }
-
-    fmt.Printf("[resolveMainNode] error: no main found\n")
-    os.Exit(-1)
-    return nil
 }
 
 /* ============================================================================

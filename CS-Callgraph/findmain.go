@@ -8,15 +8,21 @@ import (
 
 	"golang.org/x/tools/go/ssa"
 )
-func ResolveMainPackage(
+
+type FoundMain struct {
+    Packg  *ssa.Package
+    Funct *ssa.Function
+}
+
+func ResolveMain(
 	prog        *ssa.Program,
 	projectRoot string,
 	mainFlag    string,
-) *ssa.Package {
+) *FoundMain {
 	if mainFlag != "" {
-		return resolveExplicitMainPackage(prog, mainFlag)
+		return resolveExplicitMain(prog, mainFlag)
 	}
-	return findPossibleMainPackage(prog, projectRoot)
+	return findPossibleMain(prog, projectRoot)
 }
 
 /* ============================================================================
@@ -26,29 +32,35 @@ func ResolveMainPackage(
  * (e.g. "github.com/restic/restic/cmd/restic.main") and checks if it exists.
  * ============================================================================
  */
-func resolveExplicitMainPackage(prog *ssa.Program, mainFlag string) *ssa.Package {
-	lastDot := strings.LastIndex(mainFlag, ".")
-	if lastDot == -1 {
-		fmt.Printf("[ResolveMainPackage] invalid explicit main flag format: %s\n", mainFlag)
-		os.Exit(-1)
-	}
-	targetPkgPath := mainFlag[:lastDot]
+func resolveExplicitMain(prog *ssa.Program, mainFlag string) *FoundMain {
+    lastDot := strings.LastIndex(mainFlag, ".")
+    if lastDot == -1 {
+        fmt.Printf("[ResolveMain] invalid explicit main flag format: %s\n", mainFlag)
+        os.Exit(-1)
+    }
+    targetPkgPath := mainFlag[:lastDot]
+    impPkg := prog.ImportedPackage(targetPkgPath)
+    if impPkg == nil {
+        fmt.Printf("[ResolveMain] error: package %q not found\n", targetPkgPath)
+        os.Exit(-1)
+    }
+    mainPkg := prog.Package(impPkg.Pkg)
+    if mainPkg == nil || mainPkg.Pkg == nil {
+        fmt.Printf("[ResolveMain] error: structural package missing for %q\n", targetPkgPath)
+        os.Exit(-1)
+    }
 
-	impPkg := prog.ImportedPackage(targetPkgPath)
-	if impPkg == nil {
-		fmt.Printf("[ResolveMainPackage] error: package %q not found in program\n", targetPkgPath)
-		os.Exit(-1)
-	}
+    funcName := mainFlag[lastDot+1:]
+    mainFunc := mainPkg.Func(funcName)
+    if mainFunc == nil {
+        fmt.Printf("[ResolveMain] error: function %q not found in package %q\n", funcName, targetPkgPath)
+        os.Exit(-1)
+    }
 
-	mainPkg := prog.Package(impPkg.Pkg)
-	if mainPkg == nil || mainPkg.Pkg == nil {
-		fmt.Printf("[ResolveMainPackage] error: structural package object missing for %q\n", targetPkgPath)
-		os.Exit(-1)
-	}
-
-	fmt.Printf("[ResolveMainPackage] Exact match found: %s\n", mainPkg.Pkg.Path())
-	return mainPkg
+    fmt.Printf("[ResolveMain] Exact match: %s\n", mainFlag)
+    return &FoundMain{Packg: mainPkg, Funct: mainFunc}
 }
+
 
 /* ============================================================================
  * findPossibleMainPackage
@@ -61,62 +73,65 @@ func resolveExplicitMainPackage(prog *ssa.Program, mainFlag string) *ssa.Package
  *   Priority 2: Any other named package containing a main() func within projectRoot.
  * ============================================================================
  */
-func findPossibleMainPackage(prog *ssa.Program, projectRoot string) *ssa.Package {
-	var priority1 []*ssa.Package
-	var priority2 []*ssa.Package
 
-	for _, pkg := range prog.AllPackages() {
-		if pkg.Pkg == nil {
-			continue
-		}
+func findPossibleMain(prog *ssa.Program, projectRoot string) *FoundMain {
+    type candidate struct {
+        pkg  *ssa.Package
+        fn   *ssa.Function
+    }
+    var priority1, priority2 []candidate
 
-		pkgPath := pkg.Pkg.Path()
+    for _, pkg := range prog.AllPackages() {
+        if pkg.Pkg == nil {
+            continue
+        }
+        pkgPath := pkg.Pkg.Path()
+        if !strings.HasPrefix(pkgPath, projectRoot) {
+            continue
+        }
+        mainFunc := pkg.Func("main")
+        if mainFunc == nil {
+            continue
+        }
+        c := candidate{pkg: pkg, fn: mainFunc}
+        if pkg.Pkg.Name() == "main" {
+            priority1 = append(priority1, c)
+        } else {
+            priority2 = append(priority2, c)
+        }
+    }
 
-		// Verify this package belongs to the project codebase
-		if strings.HasPrefix(pkgPath, projectRoot) {
-			// Look for a physical function named "main" defined in this package block
-			if mainFunc := pkg.Func("main"); mainFunc != nil {
-				if pkg.Pkg.Name() == "main" {
-					priority1 = append(priority1, pkg)
-				} else {
-					priority2 = append(priority2, pkg)
-				}
-			}
-		}
-	}
+    sort.Slice(priority1, func(i, j int) bool {
+        return priority1[i].pkg.Pkg.Path() < priority1[j].pkg.Pkg.Path()
+    })
+    sort.Slice(priority2, func(i, j int) bool {
+        return priority2[i].pkg.Pkg.Path() < priority2[j].pkg.Pkg.Path()
+    })
 
-	// Replicate your alphabetical fallback sorting using the Package path strings
-	sort.Slice(priority1, func(i, j int) bool {
-		return priority1[i].Pkg.Path() < priority1[j].Pkg.Path()
-	})
-	sort.Slice(priority2, func(i, j int) bool {
-		return priority2[i].Pkg.Path() < priority2[j].Pkg.Path()
-	})
+    total := len(priority1) + len(priority2)
+    if total > 0 {
+        fmt.Printf("[ResolveMain] Found %d potential main(s):\n", total)
+        for _, c := range priority1 {
+            fmt.Printf("  -> [Priority 1]: %s.main\n", c.pkg.Pkg.Path())
+        }
+        for _, c := range priority2 {
+            fmt.Printf("  -> [Priority 2]: %s.main\n", c.pkg.Pkg.Path())
+        }
+    }
+    if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
+        fmt.Println("[WARNING]: Multiple possible main packages found.")
+    }
 
-	totalMains := len(priority1) + len(priority2)
-	if totalMains > 0 {
-		fmt.Printf("[ResolveMainPackage] Found %d total potential main package(s):\n", totalMains)
-		for _, pkg := range priority1 {
-			fmt.Printf("  -> [Priority 1] (pkg: main): %s.main\n", pkg.Pkg.Path())
-		}
-		for _, pkg := range priority2 {
-			fmt.Printf("  -> [Priority 2] (pkg: other): %s.main\n", pkg.Pkg.Path())
-		}
-	}
+    if len(priority1) > 0 {
+        fmt.Printf("[ResolveMain] selected: %s\n", priority1[0].pkg.Pkg.Path())
+        return &FoundMain{Packg: priority1[0].pkg, Funct: priority1[0].fn}
+    }
+    if len(priority2) > 0 {
+        fmt.Printf("[ResolveMain] selected: %s\n", priority2[0].pkg.Pkg.Path())
+        return &FoundMain{Packg: priority2[0].pkg, Funct: priority2[0].fn}
+    }
 
-	if len(priority1) > 1 || (len(priority1) == 0 && len(priority2) > 1) {
-		fmt.Println("[WARNING]: Multiple possible main packages found.")
-	}
-
-	if len(priority1) > 0 {
-		fmt.Printf("[ResolveMainPackage] selected priority main package: %s\n", priority1[0].Pkg.Path())
-		return priority1[0]
-	} else if len(priority2) > 0 {
-		fmt.Printf("[ResolveMainPackage] selected priority main package: %s\n", priority2[0].Pkg.Path())
-		return priority2[0]
-	}
-
-	fmt.Printf("[ResolveMainPackage] error: no package containing a main function found\n")
-	os.Exit(-1)
-	return nil
+    fmt.Printf("[ResolveMain] error: no main found\n")
+    os.Exit(-1)
+    return nil
 }
