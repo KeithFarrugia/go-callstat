@@ -43,6 +43,7 @@ func (e *EdgeKindCounts) add(kind cs_callgraph.EdgeKind) {
 type PackageStats struct {
 	Path            string          `json:"path"`
 	Depth           int             `json:"depth"`
+	IsStdlib        bool            `json:"isStdlib"`
 	FunctionCount   int             `json:"functionCount"`
 	UnusedFunctions []string        `json:"unusedFunctions"`
 	Edges           *EdgeKindCounts `json:"edges"`
@@ -97,6 +98,7 @@ func (r *CallGraphReport) getPkg(
 		d = depth
 	}
 	pkg := newPackageStats(path, d)
+	pkg.IsStdlib = cs_callgraph.IsStdlib(path)
 	r.Packages[path] = pkg
 	return pkg
 }
@@ -150,9 +152,10 @@ func GatherCallGraphStats(
     maxDepth    int,
     projectRoot string,
     main        *ssa.Function,
+	skipPkg     map[string]struct{},
 ) *CallGraphReport {
     report := newCallGraphReport(maxDepth)
-    inDepth := makeDepthGate(depthMap, maxDepth)
+    inDepth := makeDepthGate(depthMap, maxDepth, skipPkg)
 
     countFunctions(g, report, depthMap, inDepth)
     countEdges(g, report, depthMap, inDepth)
@@ -166,7 +169,7 @@ func GatherCallGraphStats(
 
     collectUnused(g, report, depthMap, inDepth)
 	report.Indirect = GatherResearchStats(
-		g, depthMap, maxDepth, projectRoot, mainNode,
+		g, depthMap, maxDepth, projectRoot, mainNode, skipPkg,
 	);
     return report
 }
@@ -176,8 +179,16 @@ func GatherCallGraphStats(
  * Returns a closure that reports whether a package path is within depth.
  * ============================================================================
  */
-func makeDepthGate(depthMap map[string]int, maxDepth int) func(string) bool {
+func makeDepthGate(
+	depthMap map[string]int, 
+	maxDepth int,
+	skipPkg  map[string]struct{},
+)func(string) bool {
 	return func(pkgPath string) bool {
+		if _, skip := skipPkg[pkgPath]; skip {
+            return false
+        }
+
 		if maxDepth == -1 {
 			return true
 		}

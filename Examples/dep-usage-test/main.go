@@ -1,6 +1,6 @@
 package main
 
-import "example.com/depusagetest/something"
+import secondary "example.com/depusagetest/something"
 
 /* ============================================================================
  * Function registry
@@ -32,7 +32,7 @@ func triangle(b, h float32) float32                   	{ return 0.5 * b * h }
 func rect(w, h float32) float32                        	{ return w * h }
 func scale(x, _ float32) float32                       	{ return x * 2 }
 func halve(x, _ float32) float32                       	{ return x / 2 }
-func cubed(x int)	int							{ return x*x*x }
+func cubed(x int)	int							        { return x*x*x }
 func double(x int) int                                 	{ return x * 2 }
 
 func worker(_ int, jobs <-chan int, results chan<- int) {
@@ -90,7 +90,7 @@ func main() {
     /* -------------------------------------------------------
     * ssa.CallInstruction: method on concrete type -> bob.Ping
     * ------------------------------------------------------- */
-    bob := &something.Bob{}
+    bob := &secondary.Test{}
     bob.Ping()
 
     /* -------------------------------------------------------
@@ -140,6 +140,6 @@ func main() {
     * Generics / Templates: GenericBob[int].Process
     * Tests: resolveServiceableFunc unwrapping instantiations
     * ------------------------------------------------------- */
-    gBob := &something.GenericBob[int]{Data: 42}
+    gBob := &secondary.GenericTest[int]{Data: 42}
     gBob.Process(10)
 }

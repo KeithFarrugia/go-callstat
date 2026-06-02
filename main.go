@@ -62,17 +62,6 @@ func GetModuleName(targetDir string) string {
     return ""
 }
 
-/* ============================================================================
- * isStdlib
- * ----------------------------------------------------------------------------
- * Reports whether pkgPath belongs to the Go standard library.
- * stdlib paths have no dot in the first path segment (e.g. "fmt", "go/types").
- * ============================================================================
- */
-func isStdlib(pkgPath string) bool {
-    first := strings.SplitN(pkgPath, "/", 2)[0]
-    return !strings.Contains(first, ".")
-}
 
 /* ============================================================================
  * matchesPattern
@@ -113,7 +102,7 @@ func buildSkipMap(
     result := make(map[string]struct{})
     for _, path := range allPkgPaths {
         patternMatch := matchesPattern(path, patterns)
-        stdlibMatch  := excludeStdlib && isStdlib(path)
+        stdlibMatch  := excludeStdlib && cs_callgraph.IsStdlib(path)
         if patternMatch || stdlibMatch {
             result[path] = struct{}{}
         }
@@ -177,7 +166,7 @@ func main() {
     /* -------------------------------------------------------
      * Benchmark loop
      * ------------------------------------------------------- */
-
+    cs_callgraph.InitSTDLib();
     cs_callgraph.EffectivePkgCache = sync.Map{}
     totalTimeStart := time.Now()
 
@@ -192,6 +181,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
+    
     fmt.Printf("[timer] package load  %v\n", time.Since(t))
 
     /* -------------------------------------------------------
@@ -229,7 +219,7 @@ func main() {
     if !*noStats {
         t = time.Now()
         statsObj := stats.GatherCallGraphStats(
-            cg, depthMap, *depthFlag, projectRoot, targetMainPkg.Funct,
+            cg, depthMap, *depthFlag, projectRoot, targetMainPkg.Funct, skipCGMap,
         )
         statsObj.WriteJSONToFile(*statsOut)
         fmt.Printf("[timer] statistics    %v\n", time.Since(t))
@@ -240,7 +230,7 @@ func main() {
     * ------------------------------------------------------- */
     if !*noVis {
         t = time.Now()
-        skipVisMap := buildSkipMap(skipVisPatterns, false, allPkgPaths)
+        skipVisMap := buildSkipMap(skipVisPatterns, *noStdlib, allPkgPaths)
         err = visualisation.GenerateHTMLReport(
             cg, *dotDir, *svgDir, *reportOut,
             0, skipVisMap, depthMap, *depthFlag, *statsOut, projectRoot,

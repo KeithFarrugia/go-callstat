@@ -972,7 +972,9 @@ function renderHomeStats() {
     });
 
     statsPanel.innerHTML = `
-    <div class="stats-title">Overview <span class="badge">depth: ${stats.maxDepthSpecified}</span></div>
+    <div class="stats-title">Overview 
+        <span class="badge">depth: ${stats.maxDepthSpecified}</span>
+    </div>
     <div class="cards">
         ${card(fmt(stats.totalFunctions), 'Total Functions', 'All packages')}
         ${card(fmt(stats.reachableFunctions), 'Reachable', rPct.toFixed(1)+'%', 'c-green')}
@@ -1157,7 +1159,11 @@ function renderPkgStats(pkg) {
 
     // 3. Render HTML
     statsPanel.innerHTML = `
-    <div class="stats-title">${pkg}</div>
+    <div class="stats-title">
+        ${pkg}
+        <span class="badge">is std: ${p.depth}</span>    
+        <span class="badge">depth: ${p.isStdlib}</span>    
+    </div>
     <div class="cards">
         ${card(fmt(totalCount), 'Functions', 'In package')}
         

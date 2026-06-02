@@ -99,9 +99,10 @@ func GatherResearchStats(
 	maxDepth    int,
 	projectRoot string,
 	mainNode 	*cs_callgraph.Node,
+	skipPkg  map[string]struct{},
 ) *IndirectAnalysisReport {
 	report  := newIndirectReport()
-	inDepth := makeDepthGate(depthMap, maxDepth)
+	inDepth := makeDepthGate(depthMap, maxDepth, skipPkg)
 
 	if mainNode != nil {
 		visited := make(map[int]struct{})

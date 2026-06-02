@@ -88,10 +88,9 @@ func pkgGroup(path, projectRoot string) string {
 	if projectRoot != "" && strings.HasPrefix(path, projectRoot) {
 		return "internal"
 	}
-	first := strings.SplitN(path, "/", 2)[0]
-	if !strings.Contains(first, ".") {
-		return "stdlib"
-	}
+	if cs_callgraph.IsStdlib(path) {
+        return "stdlib"
+    }
 	return "external"
 }
 /* ============================================================================
@@ -225,6 +224,9 @@ func GenerateHTMLReport(
     fmt.Println(strings.Repeat("-", 90))
 
     for _, pkg := range pkgs {
+        if _, skip := skipPkg[pkg]; skip {
+            continue
+        }
         if maxDepth != -1 {
             if d, ok := depthMap[pkg]; !ok || d > maxDepth {
                 continue

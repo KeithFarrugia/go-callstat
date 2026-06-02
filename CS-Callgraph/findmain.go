@@ -86,7 +86,9 @@ func findPossibleMain(prog *ssa.Program, projectRoot string) *FoundMain {
             continue
         }
         pkgPath := pkg.Pkg.Path()
-        if !strings.HasPrefix(pkgPath, projectRoot) {
+        if !(
+            pkgPath == projectRoot || 
+            strings.HasPrefix(pkgPath, projectRoot+"/") ){
             continue
         }
         mainFunc := pkg.Func("main")

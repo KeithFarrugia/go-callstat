@@ -1,4 +1,4 @@
-package something
+package secondary
 
 import (
 	"fmt"
@@ -6,23 +6,23 @@ import (
 	"time"
 )
 
-type Bob struct {
+type Test struct {
     x int
 }
 
-type GenericBob[T any] struct {
+type GenericTest[T any] struct {
     Data T
 }
 
-func (g *GenericBob[T]) Process(val T) {
+func (g *GenericTest[T]) Process(val T) {
     fmt.Println("Processing generic data")
 }
 
-func (b *Bob) DoingAThing() int {
+func (b *Test) DoingAThing() int {
     return 0
 }
 
-func (b *Bob) Ping() {
+func (b *Test) Ping() {
     fmt.Println("ping")
     _ = http.MethodGet
     _ = time.Second
