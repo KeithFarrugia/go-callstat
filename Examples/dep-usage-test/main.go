@@ -1,6 +1,26 @@
 package main
 
-import secondary "example.com/depusagetest/something"
+import secondary "example.com/depusagetest/secondary"
+
+/* ============================================================================
+ * DoerPlus interface
+ * ----------------------------------------------------------------------------
+ * Extends secondary.Doer with an additional method.
+ *   DoAndDouble → used via interface dispatch below
+ * ============================================================================
+ */
+type DoerPlus interface {
+    secondary.Doer
+    DoAndDouble(x int) int
+}
+
+/* ============================================================================
+ * Concrete implementation of DoerPlus
+ * ============================================================================
+ */
+type BigDoer struct{ secondary.AddDoer }
+
+func (b BigDoer) DoAndDouble(x int) int { return b.Do(x) * 2 }
 
 /* ============================================================================
  * Function registry
@@ -142,4 +162,26 @@ func main() {
     * ------------------------------------------------------- */
     gBob := &secondary.GenericTest[int]{Data: 42}
     gBob.Process(10)
+
+
+    /* -------------------------------------------------------
+     * ssa.CallInstruction: interface dispatch -> secondary.Doer.Do
+     * Tests: IsInvoke with interface defined in external package
+     * ------------------------------------------------------- */
+    var d secondary.Doer = secondary.AddDoer{}
+    _ = d.Do(5)
+    d = secondary.NegDoer{}
+    _ = d.Do(5)
+
+    /* -------------------------------------------------------
+     * ssa.CallInstruction: interface dispatch -> DoerPlus.DoAndDouble
+     * Tests: IsInvoke with extended interface defined in main package
+     * ------------------------------------------------------- */
+    var dp DoerPlus = BigDoer{}
+    _ = dp.DoAndDouble(3)
+
+    /* -------------------------------------------------------
+     * secondary.Doer.Report is intentionally never called
+     * Tests: unused interface method detection
+     * ------------------------------------------------------- */
 }

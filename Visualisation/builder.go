@@ -87,10 +87,36 @@ func BuildDotGraphPerPackage(
 		 * ------------------------------------------------------- */
 		handleEdges(pkgGraph, n, pkgPath)
 	}
-
+	/* -------------------------------------------------------
+     * Interface method nodes: seed into their own package graph
+     * and register any incoming edges from concrete callers.
+     * ------------------------------------------------------- */
+    for _, n := range g.IfaceNodes {
+		if n.IfaceMethod.Pkg() == nil {
+			continue
+		}
+        pkgPath := n.IfaceMethod.Pkg().Path()
+        if _, skip := skipPkg[pkgPath]; skip {
+            continue
+        }
+        pkgGraph := ensurePackageGraph(packageGraphs, pkgPath)
+        registerIfaceNode(pkgGraph, n)
+    }
 	return packageGraphs
 }
-
+/* ============================================================================
+ * registerIfaceNode
+ * ----------------------------------------------------------------------------
+ * Adds an interface method node to its home package graph.
+ * ============================================================================
+ */
+func registerIfaceNode(pkgGraph *DotGraph, n *cs_callgraph.Node) {
+    nodeID := convertNodeID(n.ID, ns_interface)
+    if _, exists := pkgGraph.Nodes[nodeID]; exists {
+        return
+    }
+    pkgGraph.Nodes[nodeID] = buildNodeFromCS(n)
+}
 /* ============================================================================
  * ensurePackageGraph
  * ----------------------------------------------------------------------------
@@ -156,11 +182,12 @@ func checkIncompleteCallee(e *cs_callgraph.Edge) string {
     if e.Callee == nil {
         return "Callee Node is nil"
     }
+    if e.Callee.IfaceMethod != nil {
+        return ""
+    }
     if e.Callee.Func == nil {
         return "Callee.Func is nil (unresolved dynamic call or intrinsic)"
     }
-    // Use effectivePkg so synthetic wrappers ($bound, $thunk, etc.) resolve
-    // to their owning package via Origin() / Parent().
     if cs_callgraph.EffectivePkg(e.Callee.Func) == nil {
         return fmt.Sprintf(
             "Callee.Func (%s) has no resolvable package (synthetic with no origin)",
@@ -195,9 +222,16 @@ func handleEdge(
 	if errStr := checkIncompleteCallee(e); errStr != "" {
 		return
 	}
-
+	
 	/* -------------------------------------------------------
-	 * 3. ROOT / SPECIAL EDGE HANDLING
+	 * 3. INTERFACE HANDLING
+	 * ------------------------------------------------------- */
+	if e.Callee.IfaceMethod != nil {
+        handleIfaceEdge(pkgGraph, n, e, pkgPath)
+        return
+    }
+	/* -------------------------------------------------------
+	 * 4. ROOT / SPECIAL EDGE HANDLING
 	 * ------------------------------------------------------- */
 	if e.Callee == nil || e.Callee.Func == nil {
 		handleRootEdge(pkgGraph, e)
@@ -211,7 +245,7 @@ func handleEdge(
     calleePkg := calleePkgSSA.Pkg.Path()
 
 	/* -------------------------------------------------------
-	 * 4. INTRA-PACKAGE EDGE
+	 * 5. INTRA-PACKAGE EDGE
 	 * ------------------------------------------------------- */
 	if calleePkg == pkgPath {
 		handleIntraPackageEdge(pkgGraph, e)
@@ -219,7 +253,7 @@ func handleEdge(
 	}
 
 	/* -------------------------------------------------------
-	 * 5. INTER-PACKAGE EDGE (CLUSTER)
+	 * 6. INTER-PACKAGE EDGE (CLUSTER)
 	 * ------------------------------------------------------- */
 	handleInterPackageEdge(pkgGraph, n, e, calleePkg)
 }
@@ -249,7 +283,59 @@ func handlePanicEdge(
 		e.Description(),
 	))
 }
+/* ============================================================================
+ * handleIfaceEdge
+ * ----------------------------------------------------------------------------
+ * Routes an interface dispatch edge. If the interface method lives in the
+ * same package as the caller, it's intra-package. Otherwise it's treated
+ * like an inter-package edge into the interface's home cluster.
+ * ============================================================================
+ */
+func handleIfaceEdge(
+	pkgGraph *DotGraph, n *cs_callgraph.Node, e *cs_callgraph.Edge, callerPkg string,
+) {
+	if e.Callee.IfaceMethod.Pkg() == nil {
+        return
+    }
+    ifacePkg := e.Callee.IfaceMethod.Pkg().Path()
+    ifaceNodeID := convertNodeID(e.Callee.ID, ns_interface)
 
+    if ifacePkg == callerPkg {
+        /* -------------------------------------------------------
+         * Intra-package: node already registered by BuildDotGraphPerPackage,
+         * just add the edge.
+         * ------------------------------------------------------- */
+        if _, exists := pkgGraph.Nodes[ifaceNodeID]; !exists {
+            pkgGraph.Nodes[ifaceNodeID] = buildNodeFromCS(e.Callee)
+        }
+        pkgGraph.Edges = append(pkgGraph.Edges, buildEdge(
+            convertNodeID(n.ID, ns_normal),
+            ifaceNodeID,
+            mapEdgeKindToStyle(e.Kind),
+            e.Description(),
+        ))
+        return
+    }
+
+    /* -------------------------------------------------------
+     * Inter-package: add interface node into the callee's cluster.
+     * ------------------------------------------------------- */
+    cluster := buildCluster(pkgGraph, &ifacePkg)
+    if _, exists := cluster.Nodes[ifaceNodeID]; !exists {
+        cluster.Nodes[ifaceNodeID] = buildNode(
+            ifaceNodeID,
+            e.Callee.IfaceMethod.Name(),
+            e.Callee.IfaceMethod.FullName(),
+            ns_interface,
+        )
+    }
+    pkgGraph.Edges = append(pkgGraph.Edges, buildEdge(
+        convertNodeID(n.ID, ns_normal),
+        ifaceNodeID,
+        mapEdgeKindToStyle(e.Kind),
+        e.Description(),
+    ))
+}
 /* ============================================================================
  * handleRootEdge
  * ----------------------------------------------------------------------------
@@ -308,11 +394,14 @@ func shortPkgName(pkgPath string) string {
  * the function is nil. Used mainly for graph node labels.
  * ============================================================================
  */
-func shortFuncName(fn *cs_callgraph.Node) string {
-	if fn.Func == nil {
-		return "<root>"
-	}
-	return fn.Func.Name()
+func shortFuncName(n *cs_callgraph.Node) string {
+    if n.IfaceMethod != nil {
+        return n.IfaceMethod.Name()
+    }
+    if n.Func == nil {
+        return "<root>"
+    }
+    return n.Func.Name()
 }
 
 /* ============================================================================
@@ -322,11 +411,14 @@ func shortFuncName(fn *cs_callgraph.Node) string {
  * Used for tooltips to provide more detailed function information.
  * ============================================================================
  */
-func fullFuncName(fn *cs_callgraph.Node) string {
-	if fn.Func == nil {
-		return "<root>"
-	}
-	return fn.Func.String()
+func fullFuncName(n *cs_callgraph.Node) string {
+    if n.IfaceMethod != nil {
+        return n.IfaceMethod.FullName()
+    }
+    if n.Func == nil {
+        return "<root>"
+    }
+    return n.Func.String()
 }
 
 /* ============================================================================
@@ -335,12 +427,15 @@ func fullFuncName(fn *cs_callgraph.Node) string {
  * Converts a numeric node ID into a string identifier suitable for DOT.
  * External nodes are prefixed differently to avoid collisions and allow
  * styling/grouping.
+ * Interfaces nodes have their own prefix
  * ============================================================================
  */
 func convertNodeID(id int, typ NodeStyle) string {
 	switch typ {
 	case ns_external:
 		return "ext_" + strconv.Itoa(id)
+	case ns_interface:
+    	return "iface_" + strconv.Itoa(id)
 	default:
 		return "n" + strconv.Itoa(id)
 	}
@@ -354,17 +449,24 @@ func convertNodeID(id int, typ NodeStyle) string {
  * ============================================================================
  */
 func buildNodeFromCS(n *cs_callgraph.Node) *DotNode {
-	nodeType := ns_normal
-	if isAnonFunc(n) {
-		nodeType = ns_anon
-	}
-
-	return buildNode(
-		convertNodeID(n.ID, nodeType),
-		shortFuncName(n),
-		fullFuncName(n),
-		nodeType,
-	)
+    if n.IfaceMethod != nil {
+        return buildNode(
+            convertNodeID(n.ID, ns_interface),
+            n.IfaceMethod.Name(),
+            n.IfaceMethod.FullName(),
+            ns_interface,
+        )
+    }
+    nodeType := ns_normal
+    if isAnonFunc(n) {
+        nodeType = ns_anon
+    }
+    return buildNode(
+        convertNodeID(n.ID, nodeType),
+        shortFuncName(n),
+        fullFuncName(n),
+        nodeType,
+    )
 }
 
 /* ============================================================================

@@ -22,6 +22,11 @@
             "color":     "#722f37",
             "style":     "filled",
             "fontcolor": "white"
+        },
+        "interface": {
+            "shape"     : "box",
+            "style"     : "dotted",
+            "color"     : "#36566b"
         }
     },
     "edgeStyles": {

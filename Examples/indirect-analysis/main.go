@@ -109,110 +109,110 @@ func dispatcher(
 
 func main() {
 
-	/* -----------------------------------------------------------------------
-	 * ORIGINAL CASES (unchanged)
-	 * ----------------------------------------------------------------------- */
+	// /* -----------------------------------------------------------------------
+	//  * ORIGINAL CASES (unchanged)
+	//  * ----------------------------------------------------------------------- */
 
-	/* -----------------------------------------------------------------------
-	 *  - Function Literal Store           (storedClosure = func ..... )
-	 *  - Function variable call           (storedClosure(1, 2))
-	 *  - Function Static Call             (fmt.Println( ... ) )
-	 *
-	 * The same exact thing for the second set.
-	 * Two different signatures recorded:
-	 *   "func(int, int) int" & "func(int) int"
-	 * ----------------------------------------------------------------------- */
-	offset := 10
-	storedClosure = func(a, b int) int {
-		return a + b + offset
-	}
-	fmt.Println(storedClosure(1, 2))
+	// /* -----------------------------------------------------------------------
+	//  *  - Function Literal Store           (storedClosure = func ..... )
+	//  *  - Function variable call           (storedClosure(1, 2))
+	//  *  - Function Static Call             (fmt.Println( ... ) )
+	//  *
+	//  * The same exact thing for the second set.
+	//  * Two different signatures recorded:
+	//  *   "func(int, int) int" & "func(int) int"
+	//  * ----------------------------------------------------------------------- */
+	// offset := 10
+	// storedClosure = func(a, b int) int {
+	// 	return a + b + offset
+	// }
+	// fmt.Println(storedClosure(1, 2))
 
-	scale := 3
-	storedClosure2 = func(x int) int {
-		return x * scale
-	}
-	fmt.Println(storedClosure2(5))
+	// scale := 3
+	// storedClosure2 = func(x int) int {
+	// 	return x * scale
+	// }
+	// fmt.Println(storedClosure2(5))
 
-	/* -----------------------------------------------------------------------
-	 *  - Function Named Store
-	 *  - Function variable call
-	 *  - Function Static Call
-	 * ----------------------------------------------------------------------- */
-	storedBinary = add
-	fmt.Println(storedBinary(2, 3))
+	// /* -----------------------------------------------------------------------
+	//  *  - Function Named Store
+	//  *  - Function variable call
+	//  *  - Function Static Call
+	//  * ----------------------------------------------------------------------- */
+	// storedBinary = add
+	// fmt.Println(storedBinary(2, 3))
 
-	/* -----------------------------------------------------------------------
-	 *  - Function Named Store  (ChangeType unwrap: mathFunc → func(int,int)int)
-	 *  - Function variable call
-	 *  - Function Static Call
-	 * ----------------------------------------------------------------------- */
-	typedFn = mul
-	fmt.Println(typedFn(2, 3))
+	// /* -----------------------------------------------------------------------
+	//  *  - Function Named Store  (ChangeType unwrap: mathFunc → func(int,int)int)
+	//  *  - Function variable call
+	//  *  - Function Static Call
+	//  * ----------------------------------------------------------------------- */
+	// typedFn = mul
+	// fmt.Println(typedFn(2, 3))
 
-	/* -----------------------------------------------------------------------
-	 *  - Function Named Store in struct field  (FieldAddr + ChangeType)
-	 *  - Function variable call
-	 *  - Function Static Call
-	 * ----------------------------------------------------------------------- */
-	hs := HandlerStore{}
-	hs.fn = mul
-	fmt.Println(hs.fn(2, 3))
+	// /* -----------------------------------------------------------------------
+	//  *  - Function Named Store in struct field  (FieldAddr + ChangeType)
+	//  *  - Function variable call
+	//  *  - Function Static Call
+	//  * ----------------------------------------------------------------------- */
+	// hs := HandlerStore{}
+	// hs.fn = mul
+	// fmt.Println(hs.fn(2, 3))
 
-	/* -----------------------------------------------------------------------
-	 *  - Function Propagation Store x2
-	 *  - Function variable call x2
-	 *  - Function Static Call x2
-	 * ----------------------------------------------------------------------- */
-	anotherBinary = storedBinary
-	fmt.Println(anotherBinary(1, 1))
-	yetAnother = anotherBinary
-	fmt.Println(yetAnother(1, 1))
+	// /* -----------------------------------------------------------------------
+	//  *  - Function Propagation Store x2
+	//  *  - Function variable call x2
+	//  *  - Function Static Call x2
+	//  * ----------------------------------------------------------------------- */
+	// anotherBinary = storedBinary
+	// fmt.Println(anotherBinary(1, 1))
+	// yetAnother = anotherBinary
+	// fmt.Println(yetAnother(1, 1))
 
-	/* -----------------------------------------------------------------------
-	 * Function literal store inside a struct field
-	 *  - FuncLiteralStores++
-	 *  - FuncInStructOrMap++  (FieldAddr)
-	 * ----------------------------------------------------------------------- */
-	extra := 100
-	hs.fallback = func(x int) int {
-		return x + extra
-	}
-	fmt.Println(hs.fallback(1))
+	// /* -----------------------------------------------------------------------
+	//  * Function literal store inside a struct field
+	//  *  - FuncLiteralStores++
+	//  *  - FuncInStructOrMap++  (FieldAddr)
+	//  * ----------------------------------------------------------------------- */
+	// extra := 100
+	// hs.fallback = func(x int) int {
+	// 	return x + extra
+	// }
+	// fmt.Println(hs.fallback(1))
 
-	/* -----------------------------------------------------------------------
-	 * 2 map update functions
-	 *  - FuncInStructOrMap++ x2  (MapUpdate)
-	 * ----------------------------------------------------------------------- */
-	fnMap := map[string]func(int, int) int{
-		"add": add,
-		"sub": sub,
-	}
+	// /* -----------------------------------------------------------------------
+	//  * 2 map update functions
+	//  *  - FuncInStructOrMap++ x2  (MapUpdate)
+	//  * ----------------------------------------------------------------------- */
+	// fnMap := map[string]func(int, int) int{
+	// 	"add": add,
+	// 	"sub": sub,
+	// }
 
-	/* -----------------------------------------------------------------------
-	 *  - Static Function Call  (pickFromMap)
-	 *  - Variable Function Call  (result of map lookup)
-	 *  - Function Static Call  (fmt.Println)
-	 * ----------------------------------------------------------------------- */
-	picked := pickFromMap(fnMap, "add")
-	fmt.Println(picked(3, 4))
+	// /* -----------------------------------------------------------------------
+	//  *  - Static Function Call  (pickFromMap)
+	//  *  - Variable Function Call  (result of map lookup)
+	//  *  - Function Static Call  (fmt.Println)
+	//  * ----------------------------------------------------------------------- */
+	// picked := pickFromMap(fnMap, "add")
+	// fmt.Println(picked(3, 4))
 
-	funcJobs := make(chan func(int) int, 3)
-	intJobs  := make(chan int, 3)
-	out      := make(chan int, 3)
-	_ = intJobs
+	// funcJobs := make(chan func(int) int, 3)
+	// intJobs  := make(chan int, 3)
+	// out      := make(chan int, 3)
+	// _ = intJobs
 
-	go dispatcher(funcJobs, 10, out)
+	// go dispatcher(funcJobs, 10, out)
 
-	funcJobs <- double
-	funcJobs <- negate
-	extra2   := 1
-	funcJobs <- func(x int) int { return x + extra2 }
-	close(funcJobs)
-	fmt.Println(<-out, <-out, <-out)
+	// funcJobs <- double
+	// funcJobs <- negate
+	// extra2   := 1
+	// funcJobs <- func(x int) int { return x + extra2 }
+	// close(funcJobs)
+	// fmt.Println(<-out, <-out, <-out)
 
-	fmt.Println(applyBinary(add, 2, 3))
-	fmt.Println(applyUnary(double, 5))
+	// fmt.Println(applyBinary(add, 2, 3))
+	// fmt.Println(applyUnary(double, 5))
 
 	var d Doer
 	d = AddDoer{}

@@ -222,6 +222,17 @@ func countFunctions(
 		r.TotalFunctions++
 		r.getPkg(pkgPath, depthMap).FunctionCount++
 	}
+	for _, n := range g.IfaceNodes {
+		if n.IfaceMethod.Pkg() == nil {
+			continue
+		}
+		pkgPath := n.IfaceMethod.Pkg().Path()
+		if !inDepth(pkgPath) {
+			continue
+		}
+		r.TotalFunctions++
+		r.getPkg(pkgPath, depthMap).FunctionCount++
+	}
 }
 
 /* ============================================================================
@@ -257,6 +268,27 @@ func countEdges(
 			r.GrandTotalEdges.add(e.Kind)
 		}
 	}
+	/* -------------------------------------------------------
+     * Interface method nodes: count their outgoing edges
+     * (interface → concrete impl edges added during visit)
+     * ------------------------------------------------------- */
+    for _, n := range g.IfaceNodes {
+		if n.IfaceMethod.Pkg() == nil {
+			continue
+		}
+        pkgPath := n.IfaceMethod.Pkg().Path()
+        if !inDepth(pkgPath) {
+            continue
+        }
+        for _, e := range n.Out {
+            if !edgeCalleeInDepth(e, inDepth) {
+                continue
+            }
+            p := r.getPkg(pkgPath, depthMap)
+            p.Edges.add(e.Kind)
+            r.GrandTotalEdges.add(e.Kind)
+        }
+    }
 }
 
 /* ============================================================================
@@ -266,14 +298,20 @@ func countEdges(
  * ============================================================================
  */
 func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
-	if e.Callee == nil || e.Callee.Func == nil {
-		return false
-	}
-	calleePkg := cs_callgraph.EffectivePkg(e.Callee.Func)
-	if calleePkg == nil || calleePkg.Pkg == nil {
-		return false
-	}
-	return inDepth(calleePkg.Pkg.Path())
+    if e.Callee == nil {
+        return false
+    }
+    if e.Callee.IfaceMethod != nil {
+        return inDepth(e.Callee.IfaceMethod.Pkg().Path())
+    }
+    if e.Callee.Func == nil {
+        return false
+    }
+    calleePkg := cs_callgraph.EffectivePkg(e.Callee.Func)
+    if calleePkg == nil || calleePkg.Pkg == nil {
+        return false
+    }
+    return inDepth(calleePkg.Pkg.Path())
 }
 
 /* ============================================================================
@@ -284,26 +322,46 @@ func edgeCalleeInDepth(e *cs_callgraph.Edge, inDepth func(string) bool) bool {
  * ============================================================================
  */
 func collectUnused(
-    g           *cs_callgraph.Graph , r         *CallGraphReport, 
-    depthMap    map[string]int      , inDepth   func(string) bool,
+    g        *cs_callgraph.Graph,
+    r        *CallGraphReport,
+    depthMap map[string]int,
+    inDepth  func(string) bool,
 ) {
-	for _, n := range g.Nodes {
-		if n.Func == nil {
-			continue
-		}
-		pkg := cs_callgraph.EffectivePkg(n.Func)
-		if pkg == nil || pkg.Pkg == nil {
-			continue
-		}
-		pkgPath := pkg.Pkg.Path()
-		if !inDepth(pkgPath) {
-			continue
-		}
-		if _, reachable := r.ReachableFuncNames[n.Func.String()]; !reachable {
-			p := r.getPkg(pkgPath, depthMap)
-			p.UnusedFunctions = append(p.UnusedFunctions, n.Func.Name())
-		}
-	}
+    for _, n := range g.Nodes {
+        if n.Func == nil {
+            continue
+        }
+        pkg := cs_callgraph.EffectivePkg(n.Func)
+        if pkg == nil || pkg.Pkg == nil {
+            continue
+        }
+        if !inDepth(pkg.Pkg.Path()) {
+            continue
+        }
+        if _, reachable := r.ReachableFuncNames[n.Func.String()]; !reachable {
+            r.getPkg(pkg.Pkg.Path(), depthMap).UnusedFunctions = append(
+                r.getPkg(pkg.Pkg.Path(), depthMap).UnusedFunctions,
+                n.Func.Name(),
+            )
+        }
+    }
+
+    // Interface nodes — same criterion as traverseReachable
+    for _, n := range g.IfaceNodes {
+        if n.IfaceMethod.Pkg() == nil {
+            continue
+        }
+        pkgPath := n.IfaceMethod.Pkg().Path()
+        if !inDepth(pkgPath) {
+            continue
+        }
+        if _, reachable := r.ReachableFuncNames[n.IfaceMethod.FullName()]; !reachable {
+            r.getPkg(pkgPath, depthMap).UnusedFunctions = append(
+                r.getPkg(pkgPath, depthMap).UnusedFunctions,
+                n.IfaceMethod.FullName(),
+            )
+        }
+    }
 }
 
 /* ============================================================================
@@ -313,26 +371,50 @@ func collectUnused(
  * ============================================================================
  */
 func traverseReachable(
-    n *cs_callgraph.Node, 
-    visited map[int]struct{}, 
-    r *CallGraphReport, 
+    n       *cs_callgraph.Node,
+    visited map[int]struct{},
+    r       *CallGraphReport,
     inDepth func(string) bool,
 ) {
-    if n == nil || n.Func == nil {
-        return
-    }
-    if _, ok := visited[n.ID]; ok {
-        return
-    }
-    visited[n.ID] = struct{}{}
-
-    pkg := cs_callgraph.EffectivePkg(n.Func)
-    if pkg == nil || pkg.Pkg == nil || !inDepth(pkg.Pkg.Path()) {
+    if n == nil {
         return
     }
 
-    r.ReachableFuncNames[n.Func.String()] = struct{}{}
-    r.ReachableFunctions++
+    // Determine if this node is in-depth
+    var pkgPath string
+    if n.IfaceMethod != nil {
+        if n.IfaceMethod.Pkg() == nil {
+            return
+        }
+        pkgPath = n.IfaceMethod.Pkg().Path()
+    } else {
+        if n.Func == nil {
+            return
+        }
+        pkg := cs_callgraph.EffectivePkg(n.Func)
+        if pkg == nil || pkg.Pkg == nil {
+            return
+        }
+        pkgPath = pkg.Pkg.Path()
+    }
+
+    isInDepth := inDepth(pkgPath)
+
+    // Only mark visited if in-depth — out-of-depth nodes shouldn't
+    // block re-entry via a different in-depth path
+    if isInDepth {
+        if _, ok := visited[n.ID]; ok {
+            return
+        }
+        visited[n.ID] = struct{}{}
+
+        if n.IfaceMethod != nil {
+            r.ReachableFuncNames[n.IfaceMethod.FullName()] = struct{}{}
+        } else {
+            r.ReachableFuncNames[n.Func.String()] = struct{}{}
+        }
+        r.ReachableFunctions++
+    }
 
     for _, e := range n.Out {
         if e.Callee != nil {

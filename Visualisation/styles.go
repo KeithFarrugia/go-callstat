@@ -16,10 +16,11 @@ type NodeStyle string
 type EdgeStyle string
 
 const (
-	ns_normal   NodeStyle 	= "normal"
-	ns_anon     NodeStyle 	= "anonymous"
-	ns_external NodeStyle 	= "external"
-	ns_panic 	NodeStyle 	= "panic"
+	ns_normal    NodeStyle 	= "normal"
+	ns_anon      NodeStyle 	= "anonymous"
+	ns_external  NodeStyle 	= "external"
+	ns_interface NodeStyle  = "interface"
+	ns_panic 	 NodeStyle 	= "panic"
 
 	es_call    EdgeStyle 	= "call"
 	es_go      EdgeStyle 	= "go"

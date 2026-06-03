@@ -1,6 +1,7 @@
 package cs_callgraph
 
 import (
+	"go/types"
 	"sync"
 
 	"golang.org/x/tools/go/ssa"
@@ -127,6 +128,11 @@ func extractEdges(cg *Graph, instr ssa.Instruction) []nodeKind {
         } else {
             if fnVal, ok := isFuncValue(call.Value); ok {
                 results = append(results, nodeKind{cg.GenNode(fnVal), CallEdge})
+            } else if call.IsInvoke() {
+                ifaceNode := cg.GenIfaceNode(call.Method)
+                if ifaceNode != nil {
+                    results = append(results, nodeKind{ifaceNode, InterfaceEdge})
+                }
             } else if call.Method != nil {
                 if fn := i.Parent().Prog.FuncValue(call.Method); fn != nil {
                     results = append(results, nodeKind{cg.GenNode(resolveServiceableFunc(fn)), CallEdge})
@@ -211,7 +217,34 @@ func BuildExtendedCallGraph2(
         }
         return true, maxDepth == -1 || d <= maxDepth
     }
-    
+    /* -------------------------------------------------------
+     * Pre-pass: seed a node for every interface method declared
+     * in an in-scope package, so methods that are never dispatched
+     * still appear in the graph as isolated nodes.
+     * ------------------------------------------------------- */
+    for _, pkg := range prog.AllPackages() {
+        if pkg.Pkg == nil {
+            continue
+        }
+        known, withinDepth := pkgStatus(pkg.Pkg.Path())
+        if !known || !withinDepth {
+            continue
+        }
+        scope := pkg.Pkg.Scope()
+        for _, name := range scope.Names() {
+            tn, ok := scope.Lookup(name).(*types.TypeName)
+            if !ok {
+                continue
+            }
+            iface, ok := tn.Type().Underlying().(*types.Interface)
+            if !ok {
+                continue
+            }
+            for i := 0; i < iface.NumMethods(); i++ {
+                cg.GenIfaceNode(iface.Method(i))
+            }
+        }
+    }
     /* -------------------------------------------------------
      * visit recursively walks the call graph from fn outward.
      *
@@ -281,4 +314,79 @@ func BuildExtendedCallGraph2(
     }
 
     return cg
+}
+
+/* ============================================================================
+ * seedNodes
+ * ----------------------------------------------------------------------------
+ * Pre-pass over all in-scope packages to ensure every declared function,
+ * method, and interface method has a node in the graph — even if never
+ * reached by the visit traversal. This guarantees unused functions and
+ * never-dispatched interface methods are visible in the output.
+ *
+ * Covers:
+ *   - Top-level functions and methods via pkg.Members
+ *   - Methods on named types (concrete receivers) via prog.MethodSets
+ *   - Interface method nodes via scope type inspection
+ * ============================================================================
+ */
+func seedNodes(
+    cg        *Graph,
+    prog      *ssa.Program,
+    pkgStatus func(string) (known, withinDepth bool),
+) {
+    for _, pkg := range prog.AllPackages() {
+        if pkg.Pkg == nil {
+            continue
+        }
+        known, withinDepth := pkgStatus(pkg.Pkg.Path())
+        if !known || !withinDepth {
+            continue
+        }
+
+        scope := pkg.Pkg.Scope()
+        for _, name := range scope.Names() {
+            obj := scope.Lookup(name)
+
+            /* -----------------------------------------------
+             * Interface types: seed an IfaceNode for every
+             * method so never-dispatched methods are visible.
+             * ----------------------------------------------- */
+            if tn, ok := obj.(*types.TypeName); ok {
+                if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
+                    for i := 0; i < iface.NumMethods(); i++ {
+                        cg.GenIfaceNode(iface.Method(i))
+                    }
+                    continue
+                }
+            }
+        }
+
+        /* -------------------------------------------------------
+         * Concrete functions and methods via pkg.Members so that
+         * never-called functions still appear as isolated nodes.
+         * ------------------------------------------------------- */
+        for _, mem := range pkg.Members {
+            switch m := mem.(type) {
+            case *ssa.Function:
+                if resolved := resolveServiceableFunc(m); resolved != nil {
+                    cg.GenNode(resolved)
+                }
+            case *ssa.Type:
+                T := m.Type()
+                for _, candidate := range []types.Type{T, types.NewPointer(T)} {
+                    mset := prog.MethodSets.MethodSet(candidate)
+                    for i := 0; i < mset.Len(); i++ {
+                        fn := prog.MethodValue(mset.At(i))
+                        if fn == nil {
+                            continue
+                        }
+                        if resolved := resolveServiceableFunc(fn); resolved != nil {
+                            cg.GenNode(resolved)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

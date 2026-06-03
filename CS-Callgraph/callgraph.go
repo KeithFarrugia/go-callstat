@@ -3,6 +3,7 @@ package cs_callgraph
 import (
 	"fmt"
 	"go/token"
+	"go/types"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -24,6 +25,7 @@ const (
     GoEdge
     DeferEdge
     PanicEdge
+    InterfaceEdge
 )
 
 /* ============================================================================
@@ -40,6 +42,7 @@ func (k EdgeKind) String() string {
     case ReceiveEdge:   return "receive"
     case GoEdge:        return "go"
     case DeferEdge:     return "defer"
+    case InterfaceEdge: return "interface"
     case PanicEdge:     return "panic"
     default:            return "unknown"
     }
@@ -52,7 +55,8 @@ func (k EdgeKind) String() string {
  * ============================================================================
  */
 type Node struct {
-    Func *ssa.Function
+    Func        *ssa.Function
+    IfaceMethod *types.Func
     ID   int
     In   []*Edge
     Out  []*Edge
@@ -62,6 +66,7 @@ type Graph struct {
     Root      *Node                   // Distinguished root (Func may be nil)
     Nodes     map[*ssa.Function]*Node // All nodes indexed by SSA function
     PanicNode *Node                   // Single global sentinel sink
+    IfaceNodes map[*types.Func]*Node
 }
 
 type Edge struct {
@@ -114,7 +119,8 @@ type nodeKind struct {
  */
 func InitGraph(root *ssa.Function) *Graph {
     g := &Graph{
-        Nodes: make(map[*ssa.Function]*Node),
+        Nodes       : make(map[*ssa.Function]*Node),
+        IfaceNodes  : make(map[*types.Func]*Node),
     }
 
     g.Root = g.GenNode(root)
@@ -176,6 +182,9 @@ func GenEdge(
  * ============================================================================
  */
 func (n *Node) String() string {
+    if n.IfaceMethod != nil {
+        return fmt.Sprintf("iface%d:%s", n.ID, n.IfaceMethod.FullName())
+    }
     if n.Func == nil {
         return fmt.Sprintf("n%d:<root>", n.ID)
     }
