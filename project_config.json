@@ -1,0 +1,11 @@
+{
+    "croc"          : "github.com/schollz/croc/v10.main",
+    "restic"        : "github.com/restic/restic/cmd/restic.main",
+    "go-callvis"    : "github.com/ofabry/go-callvis.main",
+    "lazygit"       : "github.com/jesseduffield/lazygit.main",
+    "hugo"          : "github.com/gohugoio/hugo.main",
+    "gitleaks"      : "github.com/zricethezav/gitleaks/v8.main",
+    "gomuks"        : "go.mau.fi/gomuks/cmd/gomuks-terminal.main",
+    "doggo"         : "github.com/mr-karan/doggo/cmd/doggo.main",
+    "filippo"       : "filippo.io/age/cmd/age.main"
+}
