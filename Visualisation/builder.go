@@ -503,13 +503,17 @@ func buildNode(
  * ============================================================================
  */
 func mapEdgeKindToStyle(typ cs_callgraph.EdgeKind) EdgeStyle {
-	switch typ {
-	case cs_callgraph.CallEdge	:	return es_call
-	case cs_callgraph.DeferEdge	:	return es_defer
-	case cs_callgraph.GoEdge	:	return es_go
-	case cs_callgraph.PanicEdge	:	return es_panic
-	default						:	return es_default
-	}
+    switch typ {
+    case cs_callgraph.CallEdge      :   return es_call
+    case cs_callgraph.DeferEdge     :   return es_defer
+    case cs_callgraph.GoEdge        :   return es_go
+    case cs_callgraph.PanicEdge     :   return es_panic
+    case cs_callgraph.AssignEdge    :   return es_assign
+    case cs_callgraph.SendEdge      :   return es_send
+    case cs_callgraph.ReceiveEdge   :   return es_receive
+    case cs_callgraph.InterfaceEdge :   return es_interface
+    default                         :   return es_default
+    }
 }
 
 /* ============================================================================

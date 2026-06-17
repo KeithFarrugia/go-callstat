@@ -33,7 +33,7 @@ func (b BigDoer) DoAndDouble(x int) int { return b.Do(x) * 2 }
  *   worker     → *ssa.Go          goroutine static callee
  *   square     → CallInstruction  direct static call
  *   add        → CallInstruction  passed as callback argument
- *   bob.Ping   → CallInstruction  method on concrete type
+ *   test.Ping   → CallInstruction  method on concrete type
  *   p.Ping     → CallInstruction  interface dispatch
  *   triangle   → *ssa.Return      returned as a function value
  *   rect       → *ssa.MapUpdate   stored as a map value
@@ -110,8 +110,8 @@ func main() {
     /* -------------------------------------------------------
     * ssa.CallInstruction: method on concrete type -> bob.Ping
     * ------------------------------------------------------- */
-    bob := &secondary.Test{}
-    bob.Ping()
+    test := &secondary.Test{}
+    test.Ping()
 
     /* -------------------------------------------------------
     * ssa.CallInstruction: functional argument -> add

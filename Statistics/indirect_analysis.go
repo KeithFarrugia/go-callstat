@@ -228,7 +228,12 @@ func analyzeInstructions(fn *ssa.Function, r *IndirectAnalysisReport) {
 					r.FuncInStructOrMap++
 					r.countPotential(i.Value)
 				}
-
+			
+			case *ssa.TypeAssert:
+				if containsFunc(i.Type()) {
+					r.FuncPropagations++
+					r.countPotential(i)
+				}
 			case *ssa.Send:
 				ch, ok := i.Chan.Type().Underlying().(*types.Chan)
 				if ok && containsFunc(ch.Elem()) {

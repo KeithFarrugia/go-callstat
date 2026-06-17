@@ -16,17 +16,21 @@ type NodeStyle string
 type EdgeStyle string
 
 const (
-	ns_normal    NodeStyle 	= "normal"
-	ns_anon      NodeStyle 	= "anonymous"
-	ns_external  NodeStyle 	= "external"
-	ns_interface NodeStyle  = "interface"
-	ns_panic 	 NodeStyle 	= "panic"
+    ns_normal       NodeStyle   = "normal"
+    ns_anon         NodeStyle   = "anonymous"
+    ns_external     NodeStyle   = "external"
+    ns_interface    NodeStyle   = "interface"
+    ns_panic        NodeStyle   = "panic"
 
-	es_call    EdgeStyle 	= "call"
-	es_go      EdgeStyle 	= "go"
-	es_defer   EdgeStyle 	= "defer"
-	es_panic   EdgeStyle 	= "panic"
-	es_default EdgeStyle 	= "default"
+    es_call       	EdgeStyle   = "call"
+    es_go         	EdgeStyle   = "go"
+    es_defer      	EdgeStyle   = "defer"
+    es_panic      	EdgeStyle   = "panic"
+    es_assign     	EdgeStyle   = "assign"
+    es_send			EdgeStyle   = "send"
+    es_receive		EdgeStyle   = "receive"
+    es_interface    EdgeStyle   = "interface"
+    es_default    	EdgeStyle	= "default"
 )
 
 /* ============================================================================
@@ -41,9 +45,9 @@ const (
  * ============================================================================
  */
 type StyleConfig struct {
-	NodeStyles map[string]map[string]string `json:"nodeStyles"`
-	EdgeStyles map[string]map[string]string `json:"edgeStyles"`
-	Cluster    map[string]string            `json:"cluster"`
+    NodeStyles map[string]map[string]string `json:"nodeStyles"`
+    EdgeStyles map[string]map[string]string `json:"edgeStyles"`
+    Cluster    map[string]string            `json:"cluster"`
 }
 
 /* ============================================================================
@@ -71,29 +75,29 @@ var defaultStyleJSON []byte
  */
 func validate() error {
 
-	if global_styles == nil {
-		return fmt.Errorf("styles not loaded")
-	}
+    if global_styles == nil {
+        return fmt.Errorf("styles not loaded")
+    }
 
-	/* -------------------------------------------------------
-	 * Required Node Styles
-	 * ------------------------------------------------------- */
-	for _, key := range []string{"normal", "external"} {
-		if _, ok := global_styles.NodeStyles[key]; !ok {
-			return fmt.Errorf("missing required node style: %s", key)
-		}
-	}
+    /* -------------------------------------------------------
+     * Required Node Styles
+     * ------------------------------------------------------- */
+    for _, key := range []string{"normal", "external"} {
+        if _, ok := global_styles.NodeStyles[key]; !ok {
+            return fmt.Errorf("missing required node style: %s", key)
+        }
+    }
 
-	/* -------------------------------------------------------
-	 * Required Edge Styles
-	 * ------------------------------------------------------- */
-	for _, key := range []string{"call"} {
-		if _, ok := global_styles.EdgeStyles[key]; !ok {
-			return fmt.Errorf("missing required edge style: %s", key)
-		}
-	}
+    /* -------------------------------------------------------
+     * Required Edge Styles
+     * ------------------------------------------------------- */
+    for _, key := range []string{"call"} {
+        if _, ok := global_styles.EdgeStyles[key]; !ok {
+            return fmt.Errorf("missing required edge style: %s", key)
+        }
+    }
 
-	return nil
+    return nil
 }
 
 /* ============================================================================
@@ -105,14 +109,14 @@ func validate() error {
  */
 func LoadInternalStyles() error {
 
-	var cfg StyleConfig
+    var cfg StyleConfig
 
-	if err := json.Unmarshal(defaultStyleJSON, &cfg); err != nil {
-		return fmt.Errorf("failed to parse embedded JSON: %w", err)
-	}
+    if err := json.Unmarshal(defaultStyleJSON, &cfg); err != nil {
+        return fmt.Errorf("failed to parse embedded JSON: %w", err)
+    }
 
-	global_styles = &cfg
-	return validate()
+    global_styles = &cfg
+    return validate()
 }
 
 /* ============================================================================
@@ -129,27 +133,27 @@ func LoadInternalStyles() error {
  */
 func LoadStyles(path string) error {
 
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("could not open config file at %s: %w", path, err)
-	}
-	defer f.Close()
+    f, err := os.Open(path)
+    if err != nil {
+        return fmt.Errorf("could not open config file at %s: %w", path, err)
+    }
+    defer f.Close()
 
-	var cfg StyleConfig
+    var cfg StyleConfig
 
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		return fmt.Errorf("failed to decode JSON: %w", err)
-	}
+    if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+        return fmt.Errorf("failed to decode JSON: %w", err)
+    }
 
-	global_styles = &cfg
+    global_styles = &cfg
 
-	/* -------------------------------------------------------
-	 * Validation
-	 * ------------------------------------------------------- */
-	if err := validate(); err != nil {
-		return err
-	}
+    /* -------------------------------------------------------
+     * Validation
+     * ------------------------------------------------------- */
+    if err := validate(); err != nil {
+        return err
+    }
 
-	fmt.Printf("Successfully loaded styles from: %s\n", path)
-	return nil
+    fmt.Printf("Successfully loaded styles from: %s\n", path)
+    return nil
 }

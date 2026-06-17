@@ -54,6 +54,30 @@
             "arrowhead" : "tee",
             "label"     : "panic"
         },
+        "assign": {
+            "color"     : "#5c8a5c",
+            "style"     : "dashed",
+            "arrowhead" : "vee",
+            "label"     : "assign"
+        },
+        "send": {
+            "color"     : "#d97706",
+            "style"     : "solid",
+            "arrowhead" : "open",
+            "label"     : "send"
+        },
+        "receive": {
+            "color"     : "#0891b2",
+            "style"     : "solid",
+            "arrowhead" : "inv",
+            "label"     : "receive"
+        },
+        "interface": {
+            "color"     : "#36566b",
+            "style"     : "dotted",
+            "arrowhead" : "empty",
+            "label"     : "interface"
+        },
         "default": {
             "color"     : "#000000",
             "style"     : "dotted",
