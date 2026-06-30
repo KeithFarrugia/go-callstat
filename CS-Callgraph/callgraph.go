@@ -76,17 +76,6 @@ type Edge struct {
     Kind   EdgeKind
 }
 
-/* ============================================================================
- * AnalysisCtx
- * ----------------------------------------------------------------------------
- * Contextual information used during the call graph traversal.
- * ============================================================================
- */
-type AnalysisCtx struct {
-    CG     *Graph
-    Caller *Node
-    Visit  func(*ssa.Function)
-}
 
 /* ============================================================================
  * edgeKey
